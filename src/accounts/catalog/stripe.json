@@ -1,0 +1,21 @@
+{
+  "id": "stripe",
+  "name": "Stripe",
+  "description": "The Stripe CLI project (each is an account the CLI is logged in to, from `stripe login --project-name <name>`), for dev servers that run `stripe listen`. Profiles set STRIPE_PROJECT_NAME for their servers. There's no command to change the machine-wide default, so switch it per profile.",
+  "category": "Payments",
+  "homepage": "https://docs.stripe.com/stripe-cli",
+  "install": "brew install stripe/stripe-cli/stripe",
+  "requires": "stripe",
+  "tested": true,
+  "fields": [
+    {
+      "id": "project",
+      "label": "Project",
+      "list": "awk -F\"'\" '/^\\[.*\\]$/ { if (p != \"\") print p \"\\t\" d; p = substr($0, 2, length($0) - 2); d = \"\" } p != \"\" && /^display_name *=/ { d = $2 } END { if (p != \"\") print p \"\\t\" d }' \"${XDG_CONFIG_HOME:-$HOME/.config}/stripe/config.toml\"",
+      "current": "awk -F\"'\" 'BEGIN { p = \"default\" } /^\\[/ { exit } /^project-name *=/ { p = $2 } END { print p }' \"${XDG_CONFIG_HOME:-$HOME/.config}/stripe/config.toml\" 2>/dev/null || echo default"
+    }
+  ],
+  "env": {
+    "STRIPE_PROJECT_NAME": "{project}"
+  }
+}

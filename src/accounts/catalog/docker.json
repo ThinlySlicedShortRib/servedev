@@ -1,0 +1,22 @@
+{
+  "id": "docker",
+  "name": "Docker",
+  "description": "The Docker context: which engine `docker` talks to (Docker Desktop, OrbStack, a remote host). Switch it machine-wide here; profiles set DOCKER_CONTEXT for their servers.",
+  "category": "Containers",
+  "homepage": "https://docs.docker.com/engine/manage-resources/contexts/",
+  "install": "https://docs.docker.com/get-docker/",
+  "requires": "docker",
+  "tested": true,
+  "fields": [
+    {
+      "id": "context",
+      "label": "Context",
+      "list": "docker context ls --format '{{.Name}}\\t\\t{{.DockerEndpoint}}'",
+      "current": "docker context show",
+      "set": "docker context use {context}"
+    }
+  ],
+  "env": {
+    "DOCKER_CONTEXT": "{context}"
+  }
+}

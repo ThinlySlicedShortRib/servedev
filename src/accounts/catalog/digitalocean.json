@@ -1,0 +1,22 @@
+{
+  "id": "digitalocean",
+  "name": "DigitalOcean",
+  "description": "The doctl authentication context (one per account or team, added with `doctl auth init --context <name>`). Switch it machine-wide here; profiles set DIGITALOCEAN_CONTEXT for their servers.",
+  "category": "Cloud",
+  "homepage": "https://docs.digitalocean.com/reference/doctl/",
+  "install": "brew install doctl",
+  "requires": "doctl",
+  "tested": false,
+  "fields": [
+    {
+      "id": "context",
+      "label": "Context",
+      "list": "doctl auth list | sed 's/ (current)$//'",
+      "current": "doctl auth list | sed -n 's/ (current)$//p'",
+      "set": "doctl auth switch --context {context}"
+    }
+  ],
+  "env": {
+    "DIGITALOCEAN_CONTEXT": "{context}"
+  }
+}

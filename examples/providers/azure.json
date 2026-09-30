@@ -1,0 +1,27 @@
+{
+  "id": "azure",
+  "name": "Azure",
+  "description": "The Azure CLI subscription. Switched machine-wide with `az account set`; the az CLI reads no environment variable for it, so profiles can't pick it per server.",
+  "category": "Cloud",
+  "homepage": "https://learn.microsoft.com/cli/azure/",
+  "install": "brew install azure-cli",
+  "requires": "az",
+  "tested": false,
+  "fields": [
+    {
+      "id": "subscription",
+      "label": "Subscription",
+      "list": "az account list --query '[].[id, name]' --output tsv",
+      "current": "az account show --query id --output tsv 2>/dev/null || true",
+      "set": "az account set --subscription {subscription}"
+    }
+  ],
+  "actions": {
+    "login": {
+      "label": "Sign in",
+      "description": "Runs `az login`; finish in the browser window that opens.",
+      "command": "az login --output none",
+      "interactive": true
+    }
+  }
+}

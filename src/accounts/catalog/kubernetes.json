@@ -1,0 +1,19 @@
+{
+  "id": "kubernetes",
+  "name": "Kubernetes",
+  "description": "The kubectl context. Switch it machine-wide here; kubectl reads no environment variable that picks a context (KUBECONFIG only picks files), so profiles can't set it per server.",
+  "category": "Containers",
+  "homepage": "https://kubernetes.io/docs/reference/kubectl/",
+  "install": "brew install kubectl",
+  "requires": "kubectl",
+  "tested": true,
+  "fields": [
+    {
+      "id": "context",
+      "label": "Context",
+      "list": "kubectl config get-contexts -o name",
+      "current": "kubectl config current-context 2>/dev/null || true",
+      "set": "kubectl config use-context {context}"
+    }
+  ]
+}

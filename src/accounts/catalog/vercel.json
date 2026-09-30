@@ -1,0 +1,19 @@
+{
+  "id": "vercel",
+  "name": "Vercel",
+  "description": "The Vercel team (scope) the CLI works in. Switched machine-wide with `vercel teams switch`; the Vercel CLI reads no environment variable for the team on its own, so profiles can't pick it per server.",
+  "category": "Hosting",
+  "homepage": "https://vercel.com/docs/cli",
+  "install": "npm install -g vercel",
+  "requires": "vercel",
+  "tested": true,
+  "fields": [
+    {
+      "id": "team",
+      "label": "Team",
+      "list": "vercel teams ls --json --limit 100 --non-interactive 2>/dev/null | node -e 'const r = JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")); for (const t of r.teams) console.log(t.slug + \"\\t\" + t.name + \"\\t\" + (t.plan || \"\"))'",
+      "current": "vercel teams ls --json --limit 100 --non-interactive 2>/dev/null | node -e 'const r = JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")); for (const t of r.teams) if (t.current) console.log(t.slug)'",
+      "set": "vercel teams switch {team} --non-interactive"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "aws",
+  "name": "AWS",
+  "description": "The AWS CLI/SDK profile from ~/.aws/config. AWS has no machine-wide switch (it's the AWS_PROFILE variable), so pick it per profile; servers get AWS_PROFILE, which the AWS CLI and every AWS SDK read.",
+  "category": "Cloud",
+  "homepage": "https://aws.amazon.com/cli/",
+  "install": "brew install awscli",
+  "requires": "aws",
+  "tested": false,
+  "fields": [
+    {
+      "id": "profile",
+      "label": "Profile",
+      "list": "aws configure list-profiles",
+      "current": "printf '%s\\n' \"${AWS_PROFILE:-default}\""
+    }
+  ],
+  "env": {
+    "AWS_PROFILE": "{profile}"
+  },
+  "actions": {
+    "sso-login": {
+      "label": "Sign in with SSO",
+      "description": "Runs `aws sso login` for a profile; finish in the browser window that opens.",
+      "command": "aws sso login --profile {profile}",
+      "interactive": true
+    }
+  }
+}

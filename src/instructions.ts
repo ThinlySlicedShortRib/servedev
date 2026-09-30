@@ -1,0 +1,26 @@
+export const AGENT_INSTRUCTIONS = `## Dev servers (servedev)
+
+Use \`servedev\` to run dev servers — never run them in the foreground or with \`&\`.
+It runs each server in the background, waits until it is ready, and keeps logs.
+
+- \`servedev start [name] [-- <command>]\` — start (idempotent: returns the existing server if already running). Blocks until ready and prints the URL. With no command it uses servedev.json or the package.json \`dev\` script.
+  - \`--install\` runs \`pnpm install\` / \`npm install\` first (use when start fails with missing modules or "command not found")
+  - \`--port auto\` assigns a free port (sets $PORT and fills \`{port}\` in the command)
+  - \`--ready-log <regex>\` / \`--ready-url /health\` / \`--ready none\` for servers that don't just open a port
+- \`servedev ls\` — servers in this project with status, URL and pid
+- \`servedev logs <name> [-n 50] [--grep error] [--since 2m]\` — read logs (bounded; prefer --grep/--since over large -n)
+- \`servedev search --errors [--since 2m]\` / \`servedev search <regex> [-C 5]\` — search all servers' logs at once, with context lines
+- \`servedev runs <name>\` / \`servedev logs <name> --run <id>\` — earlier runs are kept (7 days by default); \`search --history\` searches all of them
+- \`servedev restart <name>\` / \`servedev stop <name>\` / \`servedev down\` (stop all in project)
+- \`servedev up\` — start everything in servedev.json in dependency order
+
+With the servedev MCP server connected, the same things (and profiles, custom grids, pins, custom hostnames, taking over servers started elsewhere) are tools; \`list_servers\` also shows servers running outside servedev, which explains a port that's already taken.
+
+Cloud accounts: \`servedev account\` shows this machine's Google Cloud / GitHub accounts; a profile can give its servers other ones (\`servedev profile accounts <profile> gcloud.account=<email>\`) without changing the machine's. Other platforms (AWS, Docker, …) can be added with \`servedev account catalog\` / \`account add <id>\`, or a custom JSON provider (\`account test --file\` first). Don't switch the machine's accounts (\`account use\`) unless asked. If a server gets permission errors from Google or GitHub, check which account it ran with in \`servedev status <name>\`.
+
+Environment: servers get a fresh login-shell environment at every start, plus only the variables set on purpose (\`--env KEY=VALUE\`, or \`env\` in servedev.json) — not the environment of the shell you run servedev in. To share a server with the team, \`servedev save <name>\` writes it into the repo's servedev.json (credentials in the command are stripped).
+
+After code changes, the dev server usually hot-reloads — check \`servedev search --errors --since 1m\` instead of restarting.
+If start fails, the output includes the last log lines; fix the cause, then run start again.
+Stop servers you started when you are done unless the user wants them left running.
+`;

@@ -1,0 +1,28 @@
+{
+  "id": "cloudflare",
+  "name": "Cloudflare",
+  "description": "The Cloudflare account wrangler works in, for Workers dev servers. Wrangler has no machine-wide account switch (it reads account_id from the project's config or CLOUDFLARE_ACCOUNT_ID), so pick it per profile; servers get CLOUDFLARE_ACCOUNT_ID.",
+  "category": "Edge",
+  "homepage": "https://developers.cloudflare.com/workers/wrangler/",
+  "install": "npm install -g wrangler",
+  "requires": "wrangler",
+  "tested": false,
+  "fields": [
+    {
+      "id": "account",
+      "label": "Account",
+      "list": "wrangler whoami --json 2>/dev/null | node -e 'const r = JSON.parse(require(\"fs\").readFileSync(0, \"utf8\")); for (const a of r.accounts || []) console.log(a.id + \"\\t\" + a.name)'"
+    }
+  ],
+  "env": {
+    "CLOUDFLARE_ACCOUNT_ID": "{account}"
+  },
+  "actions": {
+    "login": {
+      "label": "Sign in",
+      "description": "Runs `wrangler login`; finish in the browser window that opens.",
+      "command": "wrangler login",
+      "interactive": true
+    }
+  }
+}

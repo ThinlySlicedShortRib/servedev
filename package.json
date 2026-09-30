@@ -1,0 +1,24 @@
+{
+  "name": "servedev",
+  "version": "0.1.0",
+  "description": "Manage local dev servers — built for LLM coding agents (CLI, MCP, and a web dashboard)",
+  "type": "module",
+  "bin": {
+    "servedev": "src/cli.ts"
+  },
+  "scripts": {
+    "servedev": "bun src/cli.ts",
+    "ui:dev": "cd ui && npm run dev",
+    "build:ui": "cd ui && npm install && npm run build",
+    "build": "bun run build:ui && bun build src/cli.ts --compile --outfile dist/servedev",
+    "test": "bun test test/",
+    "typecheck": "tsc --noEmit && cd ui && npm run typecheck"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  }
+}

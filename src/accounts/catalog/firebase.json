@@ -1,0 +1,19 @@
+{
+  "id": "firebase",
+  "name": "Firebase",
+  "description": "The Firebase CLI account. Switched machine-wide with `firebase login:use`; the Firebase CLI reads no environment variable for the account, so profiles can't pick it per server. (A Firebase project folder can pin its own account with `firebase login:use` inside it.)",
+  "category": "Cloud",
+  "homepage": "https://firebase.google.com/docs/cli",
+  "install": "npm install -g firebase-tools",
+  "requires": "firebase",
+  "tested": false,
+  "fields": [
+    {
+      "id": "account",
+      "label": "Account",
+      "list": "firebase login:list 2>/dev/null | sed -n -e 's/^Logged in as //p' -e 's/^ - //p'",
+      "current": "firebase login:list 2>/dev/null | sed -n 's/^Logged in as //p'",
+      "set": "firebase login:use {account}"
+    }
+  ]
+}
