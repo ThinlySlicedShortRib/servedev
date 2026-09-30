@@ -21,8 +21,9 @@ export function mergeLayout(saved: LayoutItem[], ids: string[]): LayoutItem[] {
 const key = (items: LayoutItem[]) => JSON.stringify(items.map(({ i, x, y, w, h, mode }) => [i, x, y, w, h, mode ?? "logs"]))
 
 /**
- * The custom grid's tiles. Without a profile it's the unsaved "draft" grid; with one, tiles are
- * the profile's servers and changes save to the profile (membership and start order included).
+ * The custom grid's tiles. Without a profile it's the unsaved "draft" grid; with one of yours,
+ * tiles are the profile's servers and changes save to it (membership and start order included).
+ * A shared profile's grid is your own layout of it (reset goes back to the repo's).
  */
 export function useCustomGrid(profile: Profile | undefined, externalChange?: { scope: string; at: number } | null) {
   const scope = profile ? `profile:${profile.id}` : "draft"
@@ -93,7 +94,9 @@ export function useCustomGrid(profile: Profile | undefined, externalChange?: { s
         saved.current = k
         void api("/api/layouts", { scope, items: next, source: CLIENT_ID }).catch(() => {})
         const order = readingOrder(next)
-        if (profile && order.join(",") !== profile.servers.join(",")) {
+        // Your profiles follow their grid (servers and start order). A shared one's servers are the
+        // team's, in servedev.json; its grid is just your layout.
+        if (profile?.kind === "local" && order.join(",") !== profile.servers.join(",")) {
           void api("/api/profiles/update", { id: profile.id, servers: order }).catch(() => {})
         }
       }, 400)

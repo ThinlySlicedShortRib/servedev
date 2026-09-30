@@ -3,8 +3,8 @@ import path from "node:path";
 
 import type { Selections } from "./accounts/registry";
 import { LOCAL_SCHEMA, LOCAL_VERSION, type LocalConfig, type LocalProfileConfig } from "./config";
-import { gitInfo } from "./git";
-import { normalizeReady, type GridTile, type ProjectConfig, type ReadySpec, type ServerConfig } from "./project";
+import { gitBranch, gitInfo } from "./git";
+import type { GridTile, ProjectConfig, ReadySpec, ServerConfig } from "./project";
 
 /**
  * Servedev used to keep servers, profiles, grids, pins and settings in SQLite. They move, once,
@@ -52,8 +52,9 @@ export function buildMigration(db: Database, existing: LocalConfig, readRepo: (r
   for (const r of rows) {
     const taken = Object.entries(config.projects).find(([label, p]) => label === r.project || p.path === r.root);
     if (taken) continue;
-    const remote = gitInfo(r.root)?.remote;
-    config.projects[r.project] = { path: r.root, ...(remote ? { remote } : {}) };
+    const git = gitInfo(r.root);
+    const branch = git?.worktree ? gitBranch(r.root) : undefined;
+    config.projects[r.project] = { path: r.root, ...(git?.remote ? { remote: git.remote } : {}), ...(branch ? { worktree: branch } : {}) };
     report.projects++;
   }
   const labelOf = (root: string) => Object.entries(config.projects!).find(([, p]) => p.path === root)?.[0];
@@ -172,4 +173,3 @@ export function describeMigration(r: MigrationReport): string[] {
   ];
 }
 
-export { normalizeReady };

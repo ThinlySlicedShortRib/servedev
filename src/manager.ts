@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,6 +6,7 @@ import { clean, fileSize, readFrom } from "./logs";
 import { DB_FILE, LOG_DIR, STATE_FILE, ensureHome } from "./paths";
 import { discoverGroups, findFreePort, listeners, processTable, tcpOpen } from "./ports";
 import type { Selections } from "./accounts/registry";
+import type { ServerDef } from "./config";
 import type { ReadySpec } from "./project";
 import { Store, runLogFile } from "./store";
 
@@ -58,7 +58,7 @@ export interface Server {
 
 /** A run's platform accounts: which profile picked them, and the picks by provider id. */
 export interface ServerAccounts {
-  profile: { id: number; name: string };
+  profile: { id: string; name: string };
   selections: Selections;
 }
 
@@ -73,6 +73,8 @@ export type PublicServer = Omit<Server, "env"> & {
   config?: "defined" | "differs" | "missing";
   /** Its own variables (the ones set on purpose), values masked. */
   vars?: { name: string; preview: string; secret: boolean }[];
+  /** Where it's defined: the repo's servedev.json, your config.json, or both (your changes on top). */
+  source?: { repo: boolean; local: boolean };
 };
 
 export interface ReadyResult {
@@ -82,8 +84,11 @@ export interface ReadyResult {
 }
 
 export interface StartSpec {
+  /** Project name (from config.json's projects); the id is "<project>:<name>". */
+  project: string;
   root: string;
   name: string;
+  pinned?: boolean;
   command: string;
   cwd: string;
   env: Record<string, string>;
@@ -165,6 +170,10 @@ export class Manager extends EventEmitter {
   private purgeTimer?: ReturnType<typeof setInterval>;
   private tick = 0;
   private monitorTimer?: ReturnType<typeof setInterval>;
+  /** Servers whose definition went away (e.g. a branch without them): kept, with their history, in case it comes back. */
+  private hidden = new Map<string, Server>();
+  /** Log retention in days (a setting in config.json). */
+  retentionDays: () => number = () => 7;
 
   constructor() {
     super();
@@ -281,13 +290,45 @@ export class Manager extends EventEmitter {
     return this.list().find((s) => s.root === root && s.name === name);
   }
 
-  /** Short project label; disambiguated with a hash when two roots share a basename. */
-  projectLabel(root: string): string {
-    const existing = this.list().find((s) => s.root === root);
-    if (existing) return existing.project;
-    const base = path.basename(root).toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "root";
-    const clash = this.list().some((s) => s.project === base && s.root !== root);
-    return clash ? `${base}-${crypto.createHash("sha1").update(root).digest("hex").slice(0, 4)}` : base;
+  /**
+   * Apply definitions from config (servedev.json merged with config.json). New ones appear as
+   * stopped servers; ones that are no longer defined disappear once they aren't running (their
+   * history stays in the database, in case they come back, e.g. after switching branches back).
+   */
+  sync(defs: Iterable<ServerDef>) {
+    const seen = new Set<string>();
+    for (const d of defs) {
+      seen.add(d.id);
+      let s = this.servers.get(d.id) ?? this.hidden.get(d.id);
+      const fresh = !s;
+      s ??= { id: d.id, name: d.name, project: d.project, root: d.root, command: d.command, cwd: d.cwd, env: {}, ready: {}, status: "stopped", ports: [], logFile: "", restarts: 0 };
+      const before = JSON.stringify([s.command, s.setup, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]);
+      Object.assign(s, {
+        name: d.name,
+        project: d.project,
+        root: d.root,
+        command: d.command,
+        setup: d.setup,
+        cwd: d.cwd,
+        env: d.env,
+        portSpec: d.portSpec,
+        ready: d.ready,
+        hostname: d.hostname,
+        pinned: d.pinned,
+      });
+      const shown = this.servers.has(d.id);
+      this.servers.set(d.id, s);
+      this.hidden.delete(d.id);
+      if (fresh || !shown || JSON.stringify([s.command, s.setup, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]) !== before) {
+        this.emit("change", s);
+      }
+    }
+    for (const s of this.list()) {
+      if (seen.has(s.id) || ACTIVE.includes(s.status)) continue;
+      this.servers.delete(s.id);
+      this.hidden.set(s.id, s);
+      this.emit("remove", s);
+    }
   }
 
   // ---------- lifecycle ----------
@@ -323,7 +364,7 @@ export class Manager extends EventEmitter {
 
     if (!fs.existsSync(spec.cwd)) throw new Error(`directory does not exist: ${spec.cwd}`);
 
-    const project = this.projectLabel(spec.root);
+    const project = spec.project;
     const id = `${project}:${spec.name}`;
     const startedAt = Date.now();
     const previous = s;
@@ -350,7 +391,7 @@ export class Manager extends EventEmitter {
       ports: [],
       logFile: "",
       restarts: (previous?.restarts ?? -1) + 1,
-      pinned: previous?.pinned,
+      pinned: spec.pinned ?? previous?.pinned,
       hostname: spec.hostname,
       accounts: spec.accounts,
     };
@@ -455,30 +496,12 @@ export class Manager extends EventEmitter {
     return s;
   }
 
-  /** Set or clear a server's custom hostname. Hostnames are unique across servers. */
-  setHostname(id: string, hostname: string | undefined): Server {
-    const s = this.servers.get(id);
-    if (!s) throw new Error(`unknown server ${id}`);
-    const owner = hostname && this.list().find((o) => o.hostname === hostname && o.id !== id);
-    if (owner) throw new Error(`${hostname} is already used by ${owner.id}`);
-    s.hostname = hostname;
-    this.changed(s);
-    return s;
-  }
-
-  setPinned(id: string, pinned: boolean): Server {
-    const s = this.servers.get(id);
-    if (!s) throw new Error(`unknown server ${id}`);
-    s.pinned = pinned;
-    this.changed(s);
-    return s;
-  }
-
   async remove(id: string) {
-    const s = this.servers.get(id);
+    const s = this.servers.get(id) ?? this.hidden.get(id);
     if (!s) return;
-    await this.stop(id);
+    await this.stop(id).catch(() => {});
     this.servers.delete(id);
+    this.hidden.delete(id);
     this.rt.delete(id);
     this.dirty.delete(id);
     for (const run of this.store.deleteServer(id)) if (run.logFile) fs.rmSync(run.logFile, { force: true });
@@ -628,7 +651,7 @@ export class Manager extends EventEmitter {
 
   /** Delete logs of runs that stopped longer ago than the retention setting. */
   purgeOldLogs(): number {
-    const days = Number(this.store.getSetting("log_retention_days"));
+    const days = this.retentionDays();
     if (!(days > 0)) return 0;
     const cutoff = Date.now() - days * 86_400_000;
     const removed = this.store.purgeRunsBefore(cutoff);

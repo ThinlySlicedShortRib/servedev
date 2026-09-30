@@ -69,10 +69,10 @@ export function useFieldOptions(provider: string, field: string, selection: Sele
 }
 
 /** The profile the dashboard is showing; starts from the dashboard use its accounts. */
-export const ActiveProfileContext = React.createContext<{ id: number; servers: string[] } | undefined>(undefined)
+export const ActiveProfileContext = React.createContext<{ id: string; servers: string[] } | undefined>(undefined)
 
 /** Profile to start a server with: the one on screen when it's a member, else the daemon decides. */
-export function useStartProfile(serverId: string | undefined): number | undefined {
+export function useStartProfile(serverId: string | undefined): string | undefined {
   const p = React.useContext(ActiveProfileContext)
   return p && serverId && p.servers.includes(serverId) ? p.id : undefined
 }

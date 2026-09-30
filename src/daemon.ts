@@ -5,18 +5,37 @@ import { PRESETS, fileSize, lineAtOffset, parseDuration, queryLines, readFrom, s
 import { ACTIVE, Manager, publicView, type PublicServer, type ReadyResult, type Server } from "./manager";
 import { listeners, processTable, type Proc } from "./ports";
 import { HostProxy, type Route } from "./proxy";
-import { DAEMON_PORT, VERSION, getToken } from "./paths";
+import { DAEMON_PORT, DB_FILE, LOCAL_CONFIG, VERSION, getToken } from "./paths";
 import { autostartStatus, installAutostart, uninstallAutostart } from "./autostart";
 import { gitBranch } from "./git";
 import { cwdsOf, detectExternal, launcherOf, startTimesOf, suggestName, type ExternalServer } from "./external";
 import { selfCommand } from "./client";
-import { ConfigConflict, configState, planSave, saveToConfig } from "./config-file";
+import { configState, mergedEntry, planSave, readyToConfig, sameValue } from "./config-file";
+import {
+  ConfigConflict,
+  ConfigStore,
+  SETTINGS,
+  mergeSelections,
+  resolveConfig,
+  type ConfigIssue,
+  type LocalConfig,
+  type ProfileOverride,
+  type ProfileView,
+  type Resolved,
+  type ServerDef,
+  type SettingKey,
+} from "./config";
+import { buildMigration, describeMigration, dropConfigTables } from "./migrate-config";
+import { defaultScanRoots, locate, scanForRepos, type Located } from "./setup";
+import { deepEqual } from "./jsonc";
+import repoSchema from "../schema/servedev.schema.json";
+import localSchema from "../schema/config.schema.json";
 import { maskSecrets } from "./sanitize";
 import { applyVars, explicitPart, getLoginEnv, looksSecret, maskValue, migrateSnapshot, type EnvMigration } from "./env";
 import { AccountRegistry, PROVIDERS_DIR, type Selections } from "./accounts/registry";
 import { planInstall, type InstallPlan } from "./install";
-import { detectCommand, findRoot, loadConfig, normalizeReady, type ReadySpec } from "./project";
-import { SETTINGS, type LayoutItem, type Profile, type Run, type SettingKey } from "./store";
+import { detectCommand, findRoot, loadConfig, type GridTile, type ReadySpec, type ServerConfig } from "./project";
+import type { Run } from "./store";
 import uiBundle from "../ui/dist/index.html" with { type: "text" };
 
 // The dashboard (ui/) builds to a single self-contained HTML file, embedded here as text.
@@ -56,7 +75,7 @@ export interface StartRequest {
    * Profile whose accounts the server runs with (id or name); null for this machine's accounts.
    * Omitted: the profile it last ran with, else the one profile it's in that picks accounts.
    */
-  profile?: number | string | null;
+  profile?: string | null;
 }
 
 export interface SearchRequest {
@@ -180,7 +199,89 @@ export interface ProfileStartResult {
 export async function runDaemon(opts: { autostart?: boolean } = {}) {
   const token = getToken();
   const manager = new Manager();
+  // Branch per project folder (see branchOf below).
+  const branches = new Map<string, string | undefined>();
   await migrateEnvSnapshots();
+
+  // ---------- configuration (JSON files) ----------
+
+  const config = new ConfigStore(LOCAL_CONFIG);
+  migrateConfig();
+  let resolved: Resolved = resolveConfig(config);
+  manager.retentionDays = () => config.setting("log_retention_days");
+  manager.sync(resolved.servers.values());
+
+  /**
+   * Once: servers, profiles, grids, pins and settings move from the database into config.json.
+   * The database is copied first (servedev.db.pre-config) so nothing can be lost.
+   */
+  function migrateConfig() {
+    if (manager.store.getMeta("config_migrated")) return;
+    const db = manager.store.db;
+    const hasRows = !!db.query("SELECT 1 FROM servers LIMIT 1").get();
+    const backup = `${DB_FILE}.pre-config`;
+    if (hasRows && !fs.existsSync(backup)) {
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      fs.copyFileSync(DB_FILE, backup);
+      fs.chmodSync(backup, 0o600);
+    }
+    const safeRepo = (root: string) => {
+      try {
+        return loadConfig(root);
+      } catch {
+        return {};
+      }
+    };
+    const { config: next, report } = buildMigration(db, config.local, safeRepo);
+    if (hasRows || Object.keys(report.profileIds).length) {
+      config.editLocal((c) => {
+        for (const k of Object.keys(c)) delete (c as Record<string, unknown>)[k];
+        Object.assign(c, next);
+      });
+      for (const line of describeMigration(report)) console.log(line);
+      if (hasRows) console.log(`  (the database from before is kept at ${backup})`);
+    }
+    manager.store.setMeta("profile_ids", JSON.stringify(report.profileIds));
+    manager.store.setMeta("config_report", JSON.stringify({ at: Date.now(), ...report }));
+    dropConfigTables(db);
+    manager.store.setMeta("config_migrated", "1");
+  }
+
+  /** Re-read config after a file changed (an editor, git, the dashboard, an agent) and apply it. */
+  function reconcile() {
+    const before = JSON.stringify(resolved.profiles) + JSON.stringify([...resolved.grids]);
+    const issuesBefore = JSON.stringify(resolved.issues);
+    resolved = resolveConfig(config);
+    manager.sync(resolved.servers.values());
+    // Keep server branch tags in step with a checkout the config noticed.
+    for (const info of resolved.projects.values()) {
+      if (branches.has(info.root) && branches.get(info.root) !== info.branch) {
+        branches.set(info.root, info.branch);
+        for (const s of manager.list()) if (s.root === info.root) manager.emit("change", s);
+      }
+    }
+    if (JSON.stringify(resolved.profiles) + JSON.stringify([...resolved.grids]) !== before) profilesChanged();
+    if (JSON.stringify(resolved.issues) !== issuesBefore) manager.emit("config", configSummary());
+    syncProxy();
+  }
+  config.on("change", () => reconcile());
+  config.on("status", () => profilesChanged());
+  config.watch();
+
+  function configSummary() {
+    return { file: config.localFile, issues: resolved.issues, files: config.files().map(({ file, kind, exists, error }) => ({ file, kind, exists, error })) };
+  }
+
+  /** Config edits turn into HTTP errors the user can act on. */
+  function configCall<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      if (e instanceof ConfigConflict) throw new HttpError(409, e.message);
+      throw new HttpError(400, (e as Error).message);
+    }
+  }
 
   /**
    * Servers used to store the whole environment of whatever started them (terminal ids, agent
@@ -224,7 +325,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     const wanted = manager.list().some((s) => s.hostname);
     if (restart || !wanted) proxy.stop();
     if (wanted && !proxy.running) {
-      proxy.start(Number(manager.store.getSetting("proxy_port")));
+      proxy.start(config.setting("proxy_port"));
       console.log(proxy.running ? `hostname proxy on port ${proxy.port}${proxy.error ? ` (${proxy.error})` : ""}` : `hostname proxy failed: ${proxy.error}`);
       // Every hostname's URL depends on the proxy port.
       for (const s of manager.list()) if (s.hostname) manager.emit("change", s);
@@ -236,7 +337,6 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   }
 
   // Branch per project folder. Checked every few seconds so a `git checkout` shows up in the dashboard.
-  const branches = new Map<string, string | undefined>();
   function branchOf(root: string): string | undefined {
     if (!branches.has(root)) branches.set(root, gitBranch(root));
     return branches.get(root);
@@ -260,7 +360,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       customUrl: s.hostname ? proxy.urlFor(s.hostname) : undefined,
       branch: branchOf(s.root),
       accountsStale: accountsStale(s) || undefined,
-      config: configState(s),
+      config: configState(s, repoEntry(s.root, s.name)),
+      source: resolved.servers.get(s.id)?.source,
       vars: Object.entries(s.env ?? {}).map(([name, value]) => ({ name, preview: maskValue(value), secret: looksSecret(name) })),
     };
   }
@@ -269,13 +370,12 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
 
   const accounts = new AccountRegistry();
   await accounts.load();
-  let profileCache: Profile[] | undefined;
-  const profiles = () => (profileCache ??= manager.store.profiles());
+  const profiles = () => resolved.profiles;
 
   /** A running server's profile has since picked different accounts (or was deleted): a restart applies them. */
   function accountsStale(s: Server): boolean {
     if (!ACTIVE.includes(s.status)) return false;
-    const inProfile = (id: number) => profiles().find((p) => p.id === id);
+    const inProfile = (id: string) => profiles().find((p) => p.id === id);
     if (s.accounts) {
       const p = inProfile(s.accounts.profile.id);
       return !p || canonical(p.accounts) !== canonical(s.accounts.selections);
@@ -293,8 +393,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   }
 
   /** Which profile's accounts a start uses; see StartRequest.profile. */
-  function accountProfile(existing: Server | undefined, req: StartRequest): { profile?: Profile; note?: string } {
-    const picks = (p?: Profile) => (p && Object.keys(p.accounts).length ? p : undefined);
+  function accountProfile(existing: Server | undefined, req: StartRequest): { profile?: ProfileView; note?: string } {
+    const picks = (p?: ProfileView) => (p && Object.keys(p.accounts).length ? p : undefined);
     if (req.profile === null || req.profile === "none") return {};
     if (req.profile !== undefined) return { profile: picks(profileRef(req.profile)) };
     if (!existing) return {};
@@ -321,12 +421,37 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   const allowedHosts = new Set([`127.0.0.1:${DAEMON_PORT}`, `localhost:${DAEMON_PORT}`]);
 
   function defaultName(root: string): string {
-    const names = Object.keys(loadConfig(root).servers ?? {});
-    if (names.length === 1) return names[0];
-    const existing = manager.list().filter((s) => s.root === root);
-    if (existing.length === 1) return existing[0].name;
-    if (names.length > 1) throw new HttpError(400, `several servers are configured (${names.join(", ")}); pass a name`);
+    const here = [...resolved.servers.values()].filter((d) => d.root === root).map((d) => d.name);
+    if (here.length === 1) return here[0];
+    if (here.length > 1) throw new HttpError(400, `several servers are configured here (${here.join(", ")}); pass a name`);
     return "dev";
+  }
+
+  /** The servedev.json entry for a server, if its repo defines it. */
+  function repoEntry(root: string, name: string): ServerConfig | undefined {
+    const e = config.repo(root).servers?.[name];
+    return e && typeof e === "object" ? e : undefined;
+  }
+
+  /**
+   * Record changes to a server in config.json: a server of your own, or your changes on top of
+   * servedev.json's. A value that matches the repo's isn't stored; null clears the repo's value.
+   */
+  function writeServer(project: string, root: string, name: string, patch: Partial<Record<keyof ServerConfig, unknown>>) {
+    const repo = repoEntry(root, name);
+    config.editLocal((c) => {
+      c.servers ??= {};
+      const mine = ((c.servers[project] ??= {})[name] ??= {}) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) continue;
+        const repoValue = repo?.[key as keyof ServerConfig];
+        if (value === null) {
+          if (repoValue === undefined) delete mine[key];
+          else mine[key] = null;
+        } else if (repo && sameValue(key, repoValue, value)) delete mine[key];
+        else mine[key] = value;
+      }
+    });
   }
 
   /** Resolve a server reference: full id, or name within the project (falls back to a globally unique name when reading). */
@@ -357,66 +482,89 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     let existing: Server | undefined;
     if (req.id) {
       existing = manager.servers.get(req.id);
-      if (!existing) throw new HttpError(404, `unknown server ${req.id}`);
-      req.root = existing.root;
-      req.name = existing.name;
+      const def = resolved.servers.get(req.id);
+      if (!existing && !def) throw new HttpError(404, `unknown server ${req.id}`);
+      req.root = def?.root ?? existing!.root;
+      req.name = def?.name ?? existing!.name;
     }
     if (!req.root) throw new HttpError(400, "root is required");
     const root = path.resolve(req.root);
+    const project = configCall(() => config.ensureProject(root));
+    if (config.local.projects?.[project] && !resolved.projects.has(project)) reconcile();
     const name = req.name || defaultName(root);
     if (!/^[\w.-]+$/.test(name)) throw new HttpError(400, `invalid server name "${name}" (use letters, digits, . _ -)`);
-    existing ??= manager.find(root, name);
+    const id = `${project}:${name}`;
+    existing ??= manager.servers.get(id);
+    let def = resolved.servers.get(id);
 
-    const conf = loadConfig(root).servers?.[name];
+    // What this request changes about the server; it's remembered in config.json.
+    const patch: Partial<Record<keyof ServerConfig, unknown>> = {};
     const cwdOverride = req.cwd ? path.resolve(req.clientCwd ?? root, req.cwd) : undefined;
-    let command: string | undefined;
-    let cwd: string;
-    let portArgs: string | undefined;
+    const rel = (dir: string) => path.relative(root, dir) || undefined;
     let detected: string | undefined;
+    let portArgs: string | undefined;
     if (req.command) {
-      command = req.command;
-      cwd = cwdOverride ?? req.clientCwd ?? root;
-    } else if (conf) {
-      command = conf.command;
-      cwd = cwdOverride ?? path.resolve(root, conf.cwd ?? ".");
-    } else if (existing) {
-      command = existing.command;
-      cwd = cwdOverride ?? existing.cwd;
-    } else {
-      cwd = cwdOverride ?? req.clientCwd ?? root;
+      patch.command = req.command;
+      patch.cwd = rel(cwdOverride ?? req.clientCwd ?? root) ?? null;
+    } else if (cwdOverride) patch.cwd = rel(cwdOverride) ?? null;
+    if (!def && !req.command) {
+      const cwd = cwdOverride ?? req.clientCwd ?? root;
       const d = detectCommand(cwd, root);
-      if (d) {
-        command = d.command;
-        portArgs = d.portArgs;
-        detected = d.kind;
+      if (!d) {
+        throw new HttpError(
+          400,
+          `don't know how to start "${name}" in ${cwd}: no command given, no servedev.json entry, and no package.json dev script. ` +
+            `Pass one: servedev start ${name} -- <command>`,
+        );
       }
+      patch.command = d.command;
+      patch.cwd = rel(cwd) ?? null;
+      portArgs = d.portArgs;
+      detected = d.kind;
     }
-    if (!command) {
-      throw new HttpError(
-        400,
-        `don't know how to start "${name}" in ${cwd}: no command given, no servedev.json entry, and no package.json dev script. ` +
-          `Pass one: servedev start ${name} -- <command>`,
-      );
-    }
+    const cwd = cwdOverride ?? (req.command ? (req.clientCwd ?? root) : def?.cwd ?? req.clientCwd ?? root);
     const plan = planInstall(cwd, root);
     if (req.install && !plan) throw new HttpError(400, `--install: no package.json in ${cwd}`);
-    let setup = req.setup ?? (req.install ? plan!.setup : undefined) ?? conf?.setup ?? existing?.setup;
+    if (req.setup !== undefined) patch.setup = req.setup || null;
+    else if (req.install) patch.setup = plan!.setup;
     // A detected JS dev script with no dependencies installed would just fail; install first.
-    if (!setup && detected && plan?.state === "missing") setup = plan.setup;
-    const installing = !!plan && setup === plan.setup;
-    const hostname = req.hostname ? normalizeHostname(req.hostname) : conf?.hostname ? normalizeHostname(conf.hostname) : existing?.hostname;
-    const taken = hostname && manager.list().find((o) => o.hostname === hostname && !(o.root === root && o.name === name));
-    if (taken) throw new HttpError(409, `${hostname} is already used by ${taken.id}`);
-    let portSpec = req.port ?? conf?.port ?? existing?.portSpec;
-    if (portSpec === undefined && command.includes("{port}")) portSpec = "auto";
+    else if (!def?.setup && detected && plan?.state === "missing") patch.setup = plan.setup;
+    if (req.hostname) {
+      const hostname = normalizeHostname(req.hostname);
+      const taken = [...resolved.servers.values()].find((o) => o.hostname === hostname && o.id !== id);
+      if (taken) throw new HttpError(409, `${hostname} is already used by ${taken.id}`);
+      patch.hostname = hostname;
+    }
+    let portSpec = req.port ?? def?.portSpec;
+    if (portSpec === undefined && String(patch.command ?? def?.command ?? "").includes("{port}")) portSpec = "auto";
+    if (req.port !== undefined || (portSpec !== undefined && !def)) patch.port = portSpec;
+    // Frameworks that take --port get it in the stored command, so later starts don't need detection.
+    if (portArgs && portSpec !== undefined && !String(patch.command).includes("{port}")) patch.command = `${patch.command}${portArgs}`;
     const hasReady = req.ready && Object.values(req.ready).some((v) => v !== undefined);
-    const ready = (hasReady ? req.ready : undefined) ?? normalizeReady(conf?.ready) ?? existing?.ready ?? {};
+    if (hasReady) patch.ready = readyToConfig(req.ready) ?? null;
     // Only variables set on purpose are kept with the server; the login shell supplies the rest at each start.
     const login = await getLoginEnv();
-    let env = existing?.env ?? {};
-    if (req.env) env = explicitPart(req.env, login);
-    if (req.vars) env = applyVars(req.replaceVars ? {} : env, req.vars);
-    const baseEnv = { ...login, ...conf?.env };
+    if (req.env || req.vars) {
+      let env = def?.env ?? {};
+      if (req.env) env = explicitPart(req.env, login);
+      if (req.vars) env = applyVars(req.replaceVars ? {} : env, req.vars);
+      patch.env = Object.keys(env).length ? env : null;
+    }
+    if (Object.values(patch).some((v) => v !== undefined)) {
+      configCall(() => writeServer(project, root, name, patch));
+      reconcile();
+      def = resolved.servers.get(id);
+    }
+    if (!def) {
+      const issue = resolved.issues.find((i) => i.message.includes(`"${name}"`));
+      throw new HttpError(400, issue ? `${issue.file}: ${issue.message}` : `${id} isn't defined; pass a command`);
+    }
+    const installing = !!plan && def.setup === plan.setup;
+    if (def.hostname) {
+      const taken = manager.list().find((o) => o.hostname === def!.hostname && o.id !== id && ACTIVE.includes(o.status));
+      if (taken) throw new HttpError(409, `${def.hostname} is already used by ${taken.id}`);
+    }
+    const baseEnv = { ...login, ...def.repoEnv };
     const { profile: picker, note: accountsNote } = accountProfile(existing, req);
     let accountEnv: Record<string, string> | undefined;
     if (picker && !(existing && ACTIVE.includes(existing.status) && !req.restart)) {
@@ -431,19 +579,34 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     let result;
     try {
       result = await manager.start(
-        { root, name, command, cwd, env, baseEnv, portSpec, portArgs, setup, hostname, ready, accountEnv, accounts: serverAccounts },
+        {
+          project,
+          root,
+          name,
+          command: def.command,
+          cwd: def.cwd,
+          env: def.env,
+          baseEnv,
+          portSpec: def.portSpec,
+          setup: def.setup,
+          hostname: def.hostname,
+          ready: def.ready,
+          pinned: def.pinned,
+          accountEnv,
+          accounts: serverAccounts,
+        },
         req.restart,
       );
     } catch (e) {
       throw new HttpError(409, (e as Error).message);
     }
     const s = result.server;
-    if (hostname) syncProxy();
+    if (def.hostname) syncProxy();
     const res: StartResponse = { server: view(s), alreadyRunning: result.alreadyRunning, detected, accountsNote };
     if (!result.alreadyRunning && installing) res.install = plan;
     else if (plan?.state === "stale" || (plan?.state === "missing" && !installing)) res.installHint = plan;
     if (req.wait !== false) {
-      const timeoutSec = req.timeout ?? conf?.timeout ?? (s.setup ? 300 : 60);
+      const timeoutSec = req.timeout ?? def.timeout ?? (s.setup ? 300 : 60);
       res.ready = await manager.waitReady(s.id, timeoutSec * 1000);
       res.server = view(s);
       if (!res.ready.ok) res.logTail = logTail(s);
@@ -478,7 +641,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       dir,
       exists: true,
       root,
-      project: manager.projectLabel(root),
+      project: config.labelOf(root) ?? path.basename(root).toLowerCase().replace(/[^a-z0-9._-]+/g, "-"),
+      tracked: !!config.labelOf(root),
+      profiles: Object.keys(config.repo(root).profiles ?? {}),
       detected: detected && { command: detected.command, kind: detected.kind },
       install: planInstall(dir, root),
       configured: Object.entries(servers).map(([name, c]) => ({
@@ -591,7 +756,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
 
   function settings() {
     return Object.fromEntries(
-      (Object.keys(SETTINGS) as SettingKey[]).map((k) => [k, { value: manager.store.getSetting(k), ...SETTINGS[k] }]),
+      (Object.keys(SETTINGS) as SettingKey[]).map((k) => [k, { value: String(config.setting(k)), default: String(SETTINGS[k].default), describe: SETTINGS[k].describe }]),
     );
   }
 
@@ -613,13 +778,31 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
   }
 
-  function profileRef(ref: unknown): Profile {
-    const p = ref === undefined ? undefined : manager.store.profile(ref as string | number);
-    if (!p) {
-      const names = manager.store.profiles().map((x) => x.name);
-      throw new HttpError(404, `no profile "${ref}"${names.length ? ` (have: ${names.join(", ")})` : "; create one with servedev profile create <name>"}`);
+  /**
+   * A profile by id ("local:Mine", "capcon-apps:Full stack"), by name (yours win; a shared name in
+   * several worktrees needs the id), or by an id from before profiles moved to config.json.
+   */
+  function profileRef(ref: unknown): ProfileView {
+    const all = profiles();
+    const key = String(ref ?? "");
+    const byId = all.find((p) => p.id === key);
+    if (byId) return byId;
+    const legacy = JSON.parse(manager.store.getMeta("profile_ids") ?? "{}")[key];
+    if (legacy) {
+      const p = all.find((x) => x.id === legacy);
+      if (p) return p;
     }
-    return p;
+    const named = all.filter((p) => p.name.toLowerCase() === key.toLowerCase());
+    const mine = named.find((p) => p.kind === "local");
+    if (mine) return mine;
+    if (named.length === 1) return named[0];
+    if (named.length > 1) {
+      throw new HttpError(409, `"${key}" is shared in several worktrees; pick one by id: ${named.map((p) => `${p.id}${p.branch ? ` (${p.branch})` : ""}`).join(", ")}`);
+    }
+    throw new HttpError(
+      404,
+      `no profile "${key}"${all.length ? ` (have: ${all.map((x) => x.id).join(", ")})` : "; create one with servedev profile create <name>"}`,
+    );
   }
 
   /** Server refs from a client (names within `root`, or ids) to ids. */
@@ -629,19 +812,18 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   }
 
   function profilesChanged() {
-    profileCache = undefined;
-    manager.emit("profiles", manager.store.profiles());
+    manager.emit("profiles", profiles());
     // Servers started with a profile's accounts may now be out of date.
     for (const s of manager.list()) if (s.accounts) manager.emit("change", s);
   }
 
   /** Start a profile's servers in order, waiting for each; servers outside the profile are left alone. */
-  function startProfile(p: Profile, timeout?: number): Promise<ProfileStartResult[]> {
+  function startProfile(p: ProfileView, timeout?: number): Promise<ProfileStartResult[]> {
     return startSequence(p.servers, timeout, p.id);
   }
 
   /** Start servers one after another (each waits for the previous to be ready); running ones are skipped. */
-  async function startSequence(ids: string[], timeout?: number, profile?: number | null): Promise<ProfileStartResult[]> {
+  async function startSequence(ids: string[], timeout?: number, profile?: string | null): Promise<ProfileStartResult[]> {
     const results: ProfileStartResult[] = [];
     for (const id of ids) {
       const s = manager.servers.get(id);
@@ -718,9 +900,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     };
   }
 
-  function layoutItems(raw: unknown): LayoutItem[] {
+  function layoutItems(raw: unknown): GridTile[] {
     if (!Array.isArray(raw)) throw new HttpError(400, "layout items must be an array");
-    return (raw as LayoutItem[]).map((it) => {
+    return (raw as GridTile[]).map((it) => {
       if (typeof it?.i !== "string" || ![it.x, it.y, it.w, it.h].every((n) => Number.isInteger(n) && n >= 0)) {
         throw new HttpError(400, "each layout item needs i (server id) and whole-number x, y, w, h");
       }
@@ -756,7 +938,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     for (let i = 2; taken.has(suggestedName); i++) suggestedName = `${base}-${i}`;
     // Aux ports (e.g. Vite's HMR on 24678) sort after the app's own port.
     const port = e.ports.find((p) => p < 10000) ?? e.ports[0];
-    const project = e.orphaned ? path.basename(e.root) : manager.projectLabel(e.root);
+    const project = e.orphaned ? path.basename(e.root) : (config.labelOf(e.root) ?? path.basename(e.root).toLowerCase());
     return {
       ...e,
       command: maskSecrets(e.command),
@@ -790,29 +972,484 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
   }
 
-  /** Stop and forget servers, and take them off profiles (via the database) and saved grids. */
-  async function removeServers(ids: string[]) {
+  /**
+   * Stop and forget servers: their history, and your config for them (your own servers, pins,
+   * places in your profiles and grids). A server servedev.json defines stays defined unless
+   * `fromRepo`, which takes it out of servedev.json too.
+   */
+  async function removeServers(ids: string[], opts: { fromRepo?: boolean } = {}) {
+    const inRepo = ids.filter((id) => resolved.servers.get(id)?.source.repo);
+    if (inRepo.length && !opts.fromRepo) {
+      throw new HttpError(
+        409,
+        `${inRepo.join(", ")} ${inRepo.length === 1 ? "is" : "are"} defined in servedev.json, shared with everyone on the repo. ` +
+          `Remove ${inRepo.length === 1 ? "it" : "them"} from servedev.json too (fromRepo), or edit the file.`,
+      );
+    }
     for (const id of ids) await manager.remove(id);
-    for (const scope of manager.store.dropFromLayouts(ids)) manager.emit("layout", { scope, source: null });
-    manager.emit("profiles", manager.store.profiles());
-    syncProxy();
-  }
-
-  function configured() {
-    const roots = [...new Set(manager.list().map((s) => s.root))];
-    const out: { root: string; project: string; name: string; command: string; branch?: string }[] = [];
-    for (const root of roots) {
-      let conf;
-      try {
-        conf = loadConfig(root);
-      } catch {
-        continue;
-      }
-      for (const [name, c] of Object.entries(conf.servers ?? {})) {
-        if (!manager.find(root, name)) out.push({ root, project: manager.projectLabel(root), name, command: c.command, branch: branchOf(root) });
+    const drop = new Set(ids);
+    configCall(() =>
+      config.editLocal((c) => {
+        for (const id of ids) {
+          const d = resolved.servers.get(id);
+          if (d) delete c.servers?.[d.project]?.[d.name];
+        }
+        c.pinned = c.pinned?.filter((id) => !drop.has(id));
+        for (const p of Object.values(c.profiles ?? {})) {
+          p.servers = p.servers.filter((id) => !drop.has(id));
+          if (p.grid) p.grid = p.grid.filter((t) => !drop.has(t.i));
+        }
+        if (c.grid) c.grid = c.grid.filter((t) => !drop.has(t.i));
+      }),
+    );
+    if (opts.fromRepo) {
+      for (const id of inRepo) {
+        const d = resolved.servers.get(id)!;
+        configCall(() =>
+          config.editRepo(d.root, (c) => {
+            delete c.servers?.[d.name];
+            for (const p of Object.values(c.profiles ?? {})) {
+              p.servers = p.servers.filter((n) => n !== d.name);
+              if (p.grid) p.grid = p.grid.filter((t) => t.i !== d.name);
+            }
+          }),
+        );
       }
     }
-    return out;
+    reconcile();
+  }
+
+  /** Servers are all defined in config now; nothing is "configured but unknown". Kept for old dashboards. */
+  function configured(): never[] {
+    return [];
+  }
+
+  // ---------- profiles and grids in config files ----------
+
+  const EMAIL_LIKE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+
+  /** A shared profile's key in config.json's overrides: its repo, then its name. */
+  function editOverride(p: ProfileView, edit: (o: ProfileOverride) => void) {
+    config.editLocal((c) => {
+      c.overrides ??= {};
+      const o = ((c.overrides[p.repo!] ??= {})[p.name] ??= {});
+      edit(o);
+    });
+  }
+
+  function assertProfileName(name: string) {
+    if (!name) throw new HttpError(400, "a profile needs a name");
+    if (/[\n\r]/.test(name) || name.length > 80) throw new HttpError(400, "profile names are one line, up to 80 characters");
+  }
+
+  /** Server ids of one project as names in its servedev.json; anything else is an error. */
+  function namesIn(project: string, ids: string[], what: string): string[] {
+    return ids.map((id) => {
+      const d = resolved.servers.get(id);
+      if (!d || d.project !== project) throw new HttpError(400, `${id} isn't a server in ${project}, so it can't be in ${what}`);
+      return d.name;
+    });
+  }
+
+  /** Create a profile: yours (config.json), or shared through a project's servedev.json. */
+  function createProfile(body: Record<string, any>): ProfileView {
+    const name = String(body.name ?? "").trim();
+    assertProfileName(name);
+    const layout = body.layout === undefined ? undefined : layoutItems(body.layout);
+    const ids: string[] = body.running
+      ? manager.list().filter((s) => s.status === "running" || s.status === "starting").map((s) => s.id)
+      : layout
+        ? layout.map((it) => resolveRef(undefined, it.i, false).id)
+        : serverIds(body.root, body.servers);
+    const picks = accountSelections(body.accounts);
+    if (body.shared) {
+      const project = String(body.project ?? resolved.servers.get(ids[0] ?? "")?.project ?? config.labelOf(path.resolve(String(body.root ?? ""))) ?? "");
+      const info = resolved.projects.get(project);
+      if (!info) throw new HttpError(400, "a shared profile belongs to a project; pass project (or servers from one project)");
+      if (config.repo(info.root).profiles?.[name]) throw new HttpError(409, `${info.file} already has a profile called "${name}"`);
+      const names = namesIn(project, ids, `a profile shared in ${project}`);
+      const { needs, mine } = splitPicks(picks);
+      configCall(() =>
+        config.editRepo(info.root, (c) => {
+          c.profiles ??= {};
+          c.profiles[name] = {
+            ...(body.description ? { description: String(body.description) } : {}),
+            servers: names,
+            ...(Object.keys(needs).length ? { accounts: needs } : {}),
+            ...(layout ? { grid: layout.map((t) => ({ ...t, i: resolved.servers.get(t.i)!.name })) } : {}),
+          };
+        }),
+      );
+      reconcile();
+      const view = profiles().find((p) => p.id === `${project}:${name}`)!;
+      if (Object.keys(mine).length) configCall(() => editOverride(view, (o) => (o.accounts = mine)));
+      reconcile();
+      return profileRef(`${project}:${name}`);
+    }
+    if (config.local.profiles?.[name]) throw new HttpError(409, `you already have a profile called "${name}"`);
+    configCall(() =>
+      config.editLocal((c) => {
+        c.profiles ??= {};
+        c.profiles[name] = {
+          ...(body.description ? { description: String(body.description) } : {}),
+          servers: ids,
+          ...(Object.keys(picks).length ? { accounts: picks } : {}),
+          ...(layout ? { grid: layout } : {}),
+        };
+      }),
+    );
+    reconcile();
+    return profileRef(`local:${name}`);
+  }
+
+  /** Account picks that name a person (emails) stay yours; the rest (projects, regions) can be shared. */
+  function splitPicks(picks: Selections): { needs: Selections; mine: Selections } {
+    const needs: Selections = {};
+    const mine: Selections = {};
+    for (const [provider, sel] of Object.entries(picks)) {
+      for (const [field, value] of Object.entries(sel)) {
+        const target = EMAIL_LIKE.test(value) ? mine : needs;
+        (target[provider] ??= {})[field] = value;
+      }
+    }
+    return { needs, mine };
+  }
+
+  /**
+   * Change a profile. Yours: everything is in config.json. Shared: servers, name, description and
+   * `needs` (what the servers need, without anyone's identity) are written to servedev.json; your
+   * account picks (`accounts` / `mergeAccounts`), skipped servers and grid go to config.json.
+   */
+  function updateProfile(current: ProfileView, body: Record<string, any>): ProfileView {
+    const expect = typeof body.version === "string" ? body.version : undefined;
+    let servers: string[] | undefined;
+    if (body.servers) servers = serverIds(body.root, body.servers);
+    if (body.add) servers = [...(servers ?? [...current.servers, ...current.skipped]), ...serverIds(body.root, body.add)];
+    if (body.remove) {
+      const drop = new Set(serverIds(body.root, body.remove));
+      servers = (servers ?? [...current.servers, ...current.skipped]).filter((id) => !drop.has(id));
+    }
+    if (servers) servers = [...new Set(servers)];
+    const rename = body.rename === undefined ? undefined : String(body.rename).trim();
+    if (rename !== undefined) assertProfileName(rename);
+    let picks: Selections | undefined;
+    const base = current.kind === "shared" ? (current.mine ?? {}) : current.accounts;
+    if (body.accounts !== undefined) picks = accountSelections(body.accounts);
+    if (body.mergeAccounts) {
+      const merged: Record<string, Record<string, unknown> | null> = { ...base };
+      for (const [id, sel] of Object.entries(body.mergeAccounts as Record<string, Record<string, unknown> | null>)) {
+        merged[id] = sel === null ? null : { ...(base[id] ?? {}), ...sel };
+      }
+      picks = accountSelections(merged);
+    }
+    const description = body.description === undefined ? undefined : String(body.description);
+
+    if (current.kind === "local") {
+      const name = current.name;
+      if (rename && rename !== name && config.local.profiles?.[rename]) throw new HttpError(409, `you already have a profile called "${rename}"`);
+      configCall(() =>
+        config.editLocal(
+          (c) => {
+            const p = c.profiles?.[name];
+            if (!p) throw new HttpError(404, `profile "${name}" is gone from config.json`);
+            if (servers) {
+              p.servers = servers;
+              if (p.grid) p.grid = p.grid.filter((t) => servers!.includes(t.i));
+            }
+            if (picks) {
+              if (Object.keys(picks).length) p.accounts = picks;
+              else delete p.accounts;
+            }
+            if (description !== undefined) {
+              if (description) p.description = description;
+              else delete p.description;
+            }
+            if (rename && rename !== name) {
+              c.profiles![rename] = p;
+              delete c.profiles![name];
+            }
+          },
+          { expect },
+        ),
+      );
+      reconcile();
+      return profileRef(`local:${rename || name}`);
+    }
+
+    // Shared.
+    const info = resolved.projects.get(current.project!)!;
+    const needs = body.needs === undefined ? undefined : accountSelections(body.needs);
+    if (rename && rename !== current.name && config.repo(info.root).profiles?.[rename]) {
+      throw new HttpError(409, `${info.file} already has a profile called "${rename}"`);
+    }
+    const names = servers && namesIn(current.project!, servers, `${current.name} (shared in ${current.project})`);
+    if (names || needs || description !== undefined || (rename && rename !== current.name)) {
+      configCall(() =>
+        config.editRepo(
+          info.root,
+          (c) => {
+            const p = c.profiles?.[current.name];
+            if (!p) throw new HttpError(404, `profile "${current.name}" is gone from ${info.file}`);
+            if (names) {
+              // Servers you skip stay in the shared list; skipping is yours, not the team's.
+              const skipped = current.skipped.map((id) => resolved.servers.get(id)!.name).filter((n) => !names.includes(n) && !body.remove);
+              p.servers = [...names, ...skipped];
+              if (p.grid) p.grid = p.grid.filter((t) => p.servers.includes(t.i));
+            }
+            if (needs) {
+              if (Object.keys(needs).length) p.accounts = needs;
+              else delete p.accounts;
+            }
+            if (description !== undefined) {
+              if (description) p.description = description;
+              else delete p.description;
+            }
+            if (rename && rename !== current.name) {
+              c.profiles![rename] = p;
+              delete c.profiles![current.name];
+            }
+          },
+          { expect },
+        ),
+      );
+    }
+    const skip = body.skip === undefined ? undefined : namesIn(current.project!, serverIds(body.root, body.skip), `${current.name}`);
+    if (picks || skip || (rename && rename !== current.name)) {
+      configCall(() =>
+        config.editLocal((c) => {
+          c.overrides ??= {};
+          const repo = (c.overrides[current.repo!] ??= {});
+          const o: ProfileOverride = (repo[current.name] ??= {});
+          if (picks) {
+            if (Object.keys(picks).length) o.accounts = picks;
+            else delete o.accounts;
+          }
+          if (skip) o.skip = skip;
+          if (rename && rename !== current.name) {
+            repo[rename] = o;
+            delete repo[current.name];
+          }
+        }),
+      );
+    }
+    reconcile();
+    return profileRef(`${current.project}:${rename || current.name}`);
+  }
+
+  function deleteProfile(p: ProfileView): { deleted: string; file: string } {
+    if (p.kind === "local") {
+      configCall(() => config.editLocal((c) => void delete c.profiles?.[p.name]));
+    } else {
+      configCall(() => config.editRepo(p.root!, (c) => void delete c.profiles?.[p.name]));
+      configCall(() => config.editLocal((c) => void delete c.overrides?.[p.repo!]?.[p.name]));
+    }
+    reconcile();
+    return { deleted: p.name, file: p.file };
+  }
+
+  /**
+   * Move one of your profiles into its project's servedev.json, so everyone on the repo gets it.
+   * Servers that are only in your config.json are written to servedev.json too (credentials and
+   * machine paths left out), or teammates couldn't start them. Account picks that name a person
+   * stay yours.
+   */
+  function shareProfile(p: ProfileView, body: Record<string, any>): { profile: ProfileView; savedServers: string[]; notes: string[] } {
+    if (p.kind !== "local") throw new HttpError(400, `${p.name} is already shared in ${p.project}`);
+    const projects = [...new Set(p.servers.map((id) => resolved.servers.get(id)!.project))];
+    const project = String(body.project ?? projects[0] ?? "");
+    if (projects.length > 1) {
+      throw new HttpError(400, `${p.name} has servers from ${projects.join(", ")}; a shared profile lives in one repo, so it can only have that repo's servers`);
+    }
+    const info = resolved.projects.get(project);
+    if (!info) throw new HttpError(400, `pass the project to share ${p.name} in`);
+    const name = String(body.name ?? p.name).trim();
+    if (config.repo(info.root).profiles?.[name]) throw new HttpError(409, `${info.file} already has a profile called "${name}"`);
+    const notes: string[] = [];
+    const savedServers: string[] = [];
+    for (const id of p.servers) {
+      const def = resolved.servers.get(id)!;
+      if (def.source.repo) continue;
+      const s = manager.servers.get(id)!;
+      const plan = planSave(s, repoEntry(def.root, def.name));
+      configCall(() => config.editRepo(info.root, (c) => ((c.servers ??= {})[def.name] = mergedEntry(plan))));
+      clearLocalManaged(def, plan.omittedSecrets);
+      savedServers.push(id);
+      if (plan.removed.length) notes.push(`${id}: left out ${plan.removed.join(", ")}`);
+      if (plan.omittedSecrets.length) notes.push(`${id}: secret-looking variables stay in your config: ${plan.omittedSecrets.join(", ")}`);
+      notes.push(...plan.warnings.map((w) => `${id}: ${w}`));
+    }
+    const { needs, mine } = splitPicks(p.accounts);
+    const local = config.local.profiles?.[p.name];
+    configCall(() =>
+      config.editRepo(info.root, (c) => {
+        c.profiles ??= {};
+        c.profiles[name] = {
+          ...(p.description ? { description: p.description } : {}),
+          servers: p.servers.map((id) => resolved.servers.get(id)!.name),
+          ...(Object.keys(needs).length ? { accounts: needs } : {}),
+          ...(local?.grid?.length ? { grid: local.grid.filter((t) => p.servers.includes(t.i)).map((t) => ({ ...t, i: resolved.servers.get(t.i)!.name })) } : {}),
+        };
+      }),
+    );
+    configCall(() =>
+      config.editLocal((c) => {
+        delete c.profiles?.[p.name];
+        if (Object.keys(mine).length) ((c.overrides ??= {})[info.repo] ??= {})[name] = { accounts: mine };
+      }),
+    );
+    if (Object.keys(mine).length) notes.push(`your account picks (${Object.entries(mine).map(([k, v]) => `${k}: ${Object.values(v).join(", ")}`).join("; ")}) stay in your config`);
+    reconcile();
+    return { profile: profileRef(`${project}:${name}`), savedServers, notes };
+  }
+
+  /** A copy of any profile as one of yours, to change freely. */
+  function duplicateProfile(p: ProfileView, body: Record<string, any>): ProfileView {
+    let name = String(body.name ?? "").trim();
+    if (!name) {
+      name = p.kind === "shared" ? `${p.name} (mine)` : `${p.name} copy`;
+      for (let i = 2; config.local.profiles?.[name]; i++) name = `${p.kind === "shared" ? `${p.name} (mine` : `${p.name} copy`} ${i}${p.kind === "shared" ? ")" : ""}`;
+    }
+    assertProfileName(name);
+    if (config.local.profiles?.[name]) throw new HttpError(409, `you already have a profile called "${name}"`);
+    const grid = resolved.grids.get(`profile:${p.id}`);
+    configCall(() =>
+      config.editLocal((c) => {
+        c.profiles ??= {};
+        c.profiles[name] = {
+          ...(p.description ? { description: p.description } : {}),
+          servers: [...p.servers],
+          ...(Object.keys(p.accounts).length ? { accounts: p.accounts } : {}),
+          ...(grid?.length ? { grid } : {}),
+        };
+      }),
+    );
+    reconcile();
+    return profileRef(`local:${name}`);
+  }
+
+  /** After a server's definition moved into servedev.json, your config keeps only what it adds (e.g. secrets). */
+  function clearLocalManaged(def: ServerDef, keepEnv: string[] = []) {
+    config.editLocal((c) => {
+      const mine = c.servers?.[def.project]?.[def.name] as Record<string, unknown> | undefined;
+      if (!mine) return;
+      for (const key of ["command", "setup", "cwd", "port", "hostname", "ready"]) delete mine[key];
+      const env = mine.env as Record<string, string> | undefined;
+      if (env) {
+        const kept = Object.fromEntries(Object.entries(env).filter(([k]) => keepEnv.includes(k)));
+        if (Object.keys(kept).length) mine.env = kept;
+        else delete mine.env;
+      }
+    });
+  }
+
+  // Grids: "draft" (the unsaved grid) or "profile:<profile id>". Tiles are by server id.
+
+  function gridScope(scope: string): { kind: "draft" } | { kind: "profile"; profile: ProfileView } {
+    if (scope === "draft" || scope === "all") return { kind: "draft" };
+    const m = scope.match(/^profile:(.+)$/);
+    if (!m) throw new HttpError(400, `invalid layout scope "${scope}" (use draft or profile:<id>)`);
+    return { kind: "profile", profile: profileRef(m[1]) };
+  }
+
+  function gridInfo(scope: string) {
+    const g = gridScope(scope);
+    const items = resolved.grids.get(g.kind === "draft" ? "draft" : `profile:${g.profile.id}`) ?? null;
+    return { scope: g.kind === "draft" ? "draft" : `profile:${g.profile.id}`, items, ...(g.kind === "profile" ? { grid: g.profile.grid, kind: g.profile.kind } : {}) };
+  }
+
+  /**
+   * Save a grid. Yours and the unsaved one go to config.json; a shared profile's is your own
+   * arrangement (config.json), unless `target: "repo"` makes it the default everyone gets.
+   */
+  function setGrid(scope: string, items: GridTile[], target?: "repo") {
+    const g = gridScope(scope);
+    if (g.kind === "draft") {
+      configCall(() => config.editLocal((c) => void (c.grid = items)));
+    } else if (g.profile.kind === "local") {
+      configCall(() =>
+        config.editLocal((c) => {
+          const p = c.profiles?.[g.profile.name];
+          if (p) p.grid = items;
+        }),
+      );
+    } else {
+      const p = g.profile;
+      const tiles = items.flatMap((t) => {
+        const d = resolved.servers.get(t.i);
+        return d && d.project === p.project ? [{ ...t, i: d.name }] : [];
+      });
+      if (target === "repo") {
+        configCall(() =>
+          config.editRepo(p.root!, (c) => {
+            const shared = c.profiles?.[p.name];
+            if (shared) shared.grid = tiles;
+          }),
+        );
+        configCall(() => editOverride(p, (o) => void delete o.grid));
+      } else configCall(() => editOverride(p, (o) => void (o.grid = tiles)));
+    }
+    reconcile();
+  }
+
+  /** Drop your arrangement of a shared profile's grid, going back to the repo's. */
+  function resetGrid(scope: string) {
+    const g = gridScope(scope);
+    if (g.kind !== "profile" || g.profile.kind !== "shared") throw new HttpError(400, "only a shared profile's grid has a repo layout to go back to");
+    configCall(() => editOverride(g.profile, (o) => void delete o.grid));
+    reconcile();
+  }
+
+  // ---------- servedev setup (a new machine) ----------
+
+  function setupPlan(body: Record<string, any>) {
+    const map: Record<string, string> = body.map ?? {};
+    const entries = Object.entries(config.local.projects ?? {});
+    const needScan = entries.some(([, e]) => !fs.existsSync(e.path));
+    const scan = needScan
+      ? scanForRepos(defaultScanRoots(entries.map(([, e]) => e.path).filter((p) => fs.existsSync(p)), body.roots ?? []), Number(body.budgetMs ?? 4000))
+      : { repos: [], folders: new Map() };
+    const projects: ({ project: string; was: string; remote?: string } & Located)[] = entries.map(([label, e]) => ({
+      project: label,
+      was: e.path,
+      remote: e.remote,
+      ...locate(label, e, scan, map),
+    }));
+    // One folder, one project: a later match for a folder already taken is left for the user to map.
+    const taken = new Map<string, string>();
+    for (const p of projects) {
+      if (!p.path) continue;
+      const owner = taken.get(p.path);
+      if (owner && p.status === "found") Object.assign(p, { status: "missing", path: undefined, reason: `its match, ${p.path}, is already ${owner}'s; pass --map ${p.project}=<path>` });
+      else taken.set(p.path, p.project);
+    }
+    return { projects, scanned: needScan };
+  }
+
+  async function setup(body: Record<string, any>) {
+    const plan = setupPlan(body);
+    const moves = plan.projects.filter((p) => p.status === "found" && p.path);
+    if (body.apply && moves.length) {
+      configCall(() =>
+        config.editLocal((c) => {
+          for (const m of moves) {
+            const e = c.projects?.[m.project];
+            if (e) e.path = m.path!;
+          }
+        }),
+      );
+      reconcile();
+    }
+    // Accounts each profile's servers would need here.
+    const accountChecks: { profile: string; error: string }[] = [];
+    for (const p of profiles()) {
+      if (!Object.keys(p.accounts).length) continue;
+      try {
+        await accounts.env(accounts.normalize(p.accounts));
+      } catch (e) {
+        accountChecks.push({ profile: p.id, error: (e as Error).message });
+      }
+    }
+    return { ...plan, applied: !!body.apply && moves.length > 0, accounts: accountChecks, issues: resolved.issues, file: config.localFile };
   }
 
   function sse(req: Request, setup: (send: (event: string, data: unknown) => void) => () => void): Response {
@@ -853,7 +1490,16 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     if (p === "/api/health") return { ok: true, version: VERSION, pid: process.pid };
     if (p === "/api/pin" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
-      manager.setPinned(s.id, body.pinned !== false);
+      const on = body.pinned !== false;
+      configCall(() =>
+        config.editLocal((c) => {
+          const set = new Set(c.pinned ?? []);
+          if (on) set.add(s.id);
+          else set.delete(s.id);
+          c.pinned = [...set].sort();
+        }),
+      );
+      reconcile();
       // Pinned servers start at login; make sure the login item exists.
       const autostart = s.pinned && !autostartStatus().installed ? installAutostart(selfCommand()) : autostartStatus();
       return { server: view(s), autostart };
@@ -861,12 +1507,10 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     if (p === "/api/hostname" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
       const hostname = body.hostname ? normalizeHostname(String(body.hostname)) : undefined;
-      try {
-        manager.setHostname(s.id, hostname);
-      } catch (e) {
-        throw new HttpError(409, (e as Error).message);
-      }
-      syncProxy();
+      const owner = hostname && [...resolved.servers.values()].find((o) => o.hostname === hostname && o.id !== s.id);
+      if (owner) throw new HttpError(409, `${hostname} is already used by ${owner.id}`);
+      configCall(() => writeServer(s.project, s.root, s.name, { hostname: hostname ?? null }));
+      reconcile();
       const resolvesLocally = !hostname || hostname.endsWith(".localhost");
       return {
         server: view(s),
@@ -879,7 +1523,23 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       if (req.method === "POST") return body.enabled === false ? uninstallAutostart() : installAutostart(selfCommand());
       return autostartStatus();
     }
-    if (p === "/api/profiles" && req.method === "GET") return { profiles: manager.store.profiles() };
+    if (p === "/api/profiles" && req.method === "GET") return { profiles: profiles() };
+    // Configuration: where it lives, and what's wrong with it.
+    if (p === "/api/config/status") return configSummary();
+    if (p === "/api/projects/add" && req.method === "POST") {
+      const dir = path.resolve(String(body.root ?? "").replace(/^~(?=$|\/)/, os.homedir()));
+      if (!fs.existsSync(dir)) throw new HttpError(404, `no folder at ${dir}`);
+      const root = findRoot(dir);
+      const project = configCall(() => config.ensureProject(root));
+      reconcile();
+      return {
+        project,
+        root,
+        servers: [...resolved.servers.values()].filter((d) => d.project === project).map((d) => d.id),
+        profiles: profiles().filter((x) => x.project === project).map((x) => x.id),
+      };
+    }
+    if (p === "/api/setup" && req.method === "POST") return setup(body);
     if (p === "/api/accounts" && req.method === "GET") {
       if (q.get("refresh") === "1") {
         await accounts.load(true);
@@ -920,12 +1580,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       accountsChanged();
       // Profiles that picked accounts for it would fail to start (and to save), so their picks go too.
       // A built-in with the same id comes back, and keeps them.
-      const usedBy = r.restoredBuiltIn ? [] : profiles().filter((x) => x.accounts[id]);
-      for (const x of usedBy) {
-        const { [id]: _, ...rest } = x.accounts;
-        manager.store.updateProfile(x.id, { accounts: rest });
-      }
-      if (usedBy.length) profilesChanged();
+      const usedBy = r.restoredBuiltIn ? [] : profiles().filter((x) => (x.kind === "local" ? x.accounts : (x.mine ?? {}))[id]);
+      for (const x of usedBy) updateProfile(x, { mergeAccounts: { [id]: null } });
       return { removed: id, ...r, clearedFrom: usedBy.map((x) => x.name) };
     }
     {
@@ -941,58 +1597,17 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       return { message, provider: await accounts.state(accounts.get(String(body.provider))) };
     }
     if (p === "/api/profiles" && req.method === "POST") {
-      const name = String(body.name ?? "").trim();
-      if (!name) throw new HttpError(400, "a profile needs a name");
-      if (manager.store.profile(name)) throw new HttpError(409, `a profile called "${name}" already exists`);
-      const layout = body.layout === undefined ? undefined : layoutItems(body.layout);
-      const ids = body.running
-        ? manager.list().filter((s) => s.status === "running" || s.status === "starting").map((s) => s.id)
-        : layout
-          ? layout.map((it) => resolveRef(undefined, it.i, false).id)
-          : serverIds(body.root, body.servers);
-      const profile = manager.store.createProfile(name, ids, accountSelections(body.accounts));
-      // Saving a custom grid as a profile keeps its arrangement.
-      if (layout) {
-        manager.store.setLayout(`profile:${profile.id}`, layout);
-        manager.emit("layout", { scope: `profile:${profile.id}`, source: body.source ?? null });
-      }
-      profilesChanged();
+      const profile = createProfile(body);
+      if (body.layout !== undefined) manager.emit("layout", { scope: `profile:${profile.id}`, source: body.source ?? null });
       return { profile };
     }
     if (p === "/api/profiles/update" && req.method === "POST") {
-      const current = profileRef(body.id ?? body.profile);
-      let servers = body.servers ? serverIds(body.root, body.servers) : current.servers;
-      if (body.add) servers = [...servers, ...serverIds(body.root, body.add)];
-      if (body.remove) {
-        const drop = new Set(serverIds(body.root, body.remove));
-        servers = servers.filter((id) => !drop.has(id));
-      }
-      const rename = body.rename === undefined ? undefined : String(body.rename).trim();
-      if (rename !== undefined && !rename) throw new HttpError(400, "a profile needs a name");
-      if (rename && manager.store.profile(rename) && manager.store.profile(rename)!.id !== current.id) {
-        throw new HttpError(409, `a profile called "${rename}" already exists`);
-      }
-      let picks: Selections | undefined;
-      if (body.accounts !== undefined) picks = accountSelections(body.accounts);
-      // Change some fields and keep the rest: a provider set to null, or a field set to null or "", is cleared.
-      if (body.mergeAccounts) {
-        const merged: Record<string, Record<string, unknown> | null> = { ...current.accounts };
-        for (const [id, sel] of Object.entries(body.mergeAccounts as Record<string, Record<string, unknown> | null>)) {
-          merged[id] = sel === null ? null : { ...(current.accounts[id] ?? {}), ...sel };
-        }
-        picks = accountSelections(merged);
-      }
-      const profile = manager.store.updateProfile(current.id, { name: rename, servers, accounts: picks });
-      profilesChanged();
-      return { profile };
+      return { profile: updateProfile(profileRef(body.id ?? body.profile), body) };
     }
-    if (p === "/api/profiles/delete" && req.method === "POST") {
-      const profile = profileRef(body.id ?? body.profile);
-      manager.store.deleteProfile(profile.id);
-      manager.store.deleteLayout(`profile:${profile.id}`);
-      profilesChanged();
-      return { deleted: profile.name };
-    }
+    if (p === "/api/profiles/resolve") return { id: profileRef(q.get("ref") ?? "").id };
+    if (p === "/api/profiles/delete" && req.method === "POST") return deleteProfile(profileRef(body.id ?? body.profile));
+    if (p === "/api/profiles/share" && req.method === "POST") return shareProfile(profileRef(body.id ?? body.profile), body);
+    if (p === "/api/profiles/duplicate" && req.method === "POST") return { profile: duplicateProfile(profileRef(body.id ?? body.profile), body) };
     // Bulk actions for the dashboard: the servers of whatever it's showing (all, a profile, a grid).
     if (p === "/api/servers/start" && req.method === "POST") {
       const ids = serverIds(undefined, body.ids);
@@ -1086,15 +1701,20 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     // Save a server into its repo's servedev.json (GET previews, POST writes).
     if (p === "/api/config") {
       const s = resolveRef(undefined, (req.method === "POST" ? body.id : q.get("id")) ?? undefined, false);
-      if (req.method !== "POST") return { server: s.id, ...planSave(s, { includeSecrets: q.get("includeSecrets") === "1" }) };
-      try {
-        const r = saveToConfig(s, { force: !!body.force, includeSecrets: !!body.includeSecrets });
-        manager.emit("change", s);
-        return { server: s.id, ...r };
-      } catch (e) {
-        if (e instanceof ConfigConflict) throw new HttpError(409, e.message);
-        throw new HttpError(400, (e as Error).message);
+      const current = repoEntry(s.root, s.name);
+      const includeSecrets = req.method === "POST" ? !!body.includeSecrets : q.get("includeSecrets") === "1";
+      const plan = planSave(s, current, { includeSecrets });
+      if (req.method !== "POST") return { server: s.id, ...plan };
+      if (plan.state === "defined") return { server: s.id, ...plan, written: false };
+      if (plan.state === "differs" && !body.force) {
+        throw new HttpError(409, `${plan.file} already defines "${s.name}" differently (${plan.changes.map((c) => c.key).join(", ")}). Replace it with force.`);
       }
+      configCall(() => config.editRepo(s.root, (c) => ((c.servers ??= {})[s.name] = mergedEntry(plan))));
+      // The definition is the repo's now; your config keeps only what was left out (secret variables).
+      const def = resolved.servers.get(s.id);
+      if (def) configCall(() => clearLocalManaged(def, plan.omittedSecrets));
+      reconcile();
+      return { server: s.id, ...plan, written: true };
     }
     if (p === "/api/inspect") return inspectDir(q.get("dir") ?? "");
     if (p === "/api/pick-folder" && req.method === "POST") return { path: await pickFolder(body.start) };
@@ -1120,15 +1740,33 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     if (p === "/api/remove" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
-      await removeServers([s.id]);
+      await removeServers([s.id], { fromRepo: !!body.fromRepo });
       return { removed: s.id };
     }
-    // A tracked folder (project): every server servedev knows in it. Files on disk are untouched.
+    // A tracked folder (project): servedev forgets it, with your config for it. Files on disk (servedev.json too) are untouched.
     if (p === "/api/projects/remove" && req.method === "POST") {
-      const root = body.root ? path.resolve(String(body.root)) : manager.list().find((s) => s.project === body.project)?.root;
-      const ids = manager.list().filter((s) => s.root === root).map((s) => s.id);
-      if (!root || !ids.length) throw new HttpError(404, `servedev isn't tracking any servers in ${body.root ?? body.project}`);
-      await removeServers(ids);
+      const root = body.root ? path.resolve(String(body.root)) : config.rootOf(String(body.project ?? ""));
+      const project = root && config.labelOf(root);
+      if (!root || !project) throw new HttpError(404, `servedev isn't tracking ${body.root ?? body.project}`);
+      const ids = [...new Set([...manager.list().filter((s) => s.root === root).map((s) => s.id), ...[...resolved.servers.values()].filter((d) => d.root === root).map((d) => d.id)])];
+      for (const id of ids) await manager.remove(id);
+      const drop = new Set(ids);
+      const repo = resolved.projects.get(project)?.repo;
+      configCall(() =>
+        config.editLocal((c) => {
+          delete c.projects?.[project];
+          delete c.servers?.[project];
+          c.pinned = c.pinned?.filter((id) => !drop.has(id));
+          for (const p of Object.values(c.profiles ?? {})) {
+            p.servers = p.servers.filter((id) => !drop.has(id));
+            if (p.grid) p.grid = p.grid.filter((t) => !drop.has(t.i));
+          }
+          if (c.grid) c.grid = c.grid.filter((t) => !drop.has(t.i));
+          // Your changes to its shared profiles stay if another worktree of the repo is still tracked.
+          if (repo && ![...resolved.projects.values()].some((x) => x.repo === repo && x.label !== project)) delete c.overrides?.[repo];
+        }),
+      );
+      reconcile();
       return { removed: ids, root };
     }
     if (p === "/api/wait" && req.method === "POST") {
@@ -1164,15 +1802,17 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         readyAt: r.id === s.runId ? s.readyAt : r.readyAt,
         logSize: fileSize(r.id === s.runId ? s.logFile : r.logFile),
       }));
-      return { server: view(s), runs, retentionDays: Number(manager.store.getSetting("log_retention_days")) };
+      return { server: view(s), runs, retentionDays: config.setting("log_retention_days") };
     }
     if (p === "/api/settings") {
       if (req.method === "POST") {
         const key = body.key as SettingKey;
         if (!(key in SETTINGS)) throw new HttpError(400, `unknown setting "${key}" (have: ${Object.keys(SETTINGS).join(", ")})`);
-        const value = String(body.value);
-        if (key === "log_retention_days" && !(Number(value) >= 1)) throw new HttpError(400, "log_retention_days must be a number of days, at least 1");
-        manager.store.setSetting(key, value);
+        const value = Number(body.value);
+        if (key === "log_retention_days" && !(value >= 1)) throw new HttpError(400, "log_retention_days must be a number of days, at least 1");
+        if (key === "proxy_port" && !(Number.isInteger(value) && value > 0 && value < 65536)) throw new HttpError(400, "proxy_port must be a port number");
+        configCall(() => config.editLocal((c) => void ((c.settings ??= {})[key] = value)));
+        reconcile();
         if (key === "log_retention_days") manager.purgeOldLogs();
         if (key === "proxy_port") syncProxy(true);
       }
@@ -1181,9 +1821,11 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     if (p === "/api/stream/events") {
       return sse(req, (send) => {
-        send("snapshot", { build: UI_BUILD, servers: manager.list().map(view), configured: configured(), profiles: manager.store.profiles() });
-        const onProfiles = (profiles: Profile[]) => send("profiles", profiles);
+        send("snapshot", { build: UI_BUILD, servers: manager.list().map(view), configured: configured(), profiles: profiles(), config: configSummary() });
+        const onProfiles = (list: ProfileView[]) => send("profiles", list);
         manager.on("profiles", onProfiles);
+        const onConfig = (summary: unknown) => send("config", summary);
+        manager.on("config", onConfig);
         const onLayout = (change: { scope: string; source: string | null }) => send("layout", change);
         manager.on("layout", onLayout);
         const onAccounts = () => send("accounts", {});
@@ -1196,6 +1838,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
           manager.off("change", onChange);
           manager.off("remove", onRemove);
           manager.off("profiles", onProfiles);
+          manager.off("config", onConfig);
           manager.off("layout", onLayout);
           manager.off("accounts", onAccounts);
         };
@@ -1224,18 +1867,20 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         return () => clearInterval(timer);
       });
     }
-    if (p === "/api/layouts" && req.method === "GET") {
-      return { scope: q.get("scope") ?? "all", items: manager.store.getLayout(q.get("scope") ?? "all") ?? null };
-    }
+    if (p === "/api/layouts" && req.method === "GET") return gridInfo(q.get("scope") ?? "draft");
     if (p === "/api/layouts" && req.method === "POST") {
       const scope = String(body.scope ?? "");
-      // "draft": the unsaved custom grid; "profile:<id>": a saved profile's grid.
-      if (!/^(draft|all|profile:\d+)$/.test(scope)) throw new HttpError(400, `invalid layout scope "${scope}"`);
-      const items = layoutItems(body.items);
-      manager.store.setLayout(scope, items);
+      setGrid(scope, layoutItems(body.items), body.target === "repo" ? "repo" : undefined);
       // Open dashboards reload this grid; `source` lets the tab that saved it ignore its own change.
-      manager.emit("layout", { scope, source: body.source ?? null });
-      return { scope, items };
+      const info = gridInfo(scope);
+      manager.emit("layout", { scope: info.scope, source: body.source ?? null });
+      return info;
+    }
+    if (p === "/api/layouts/reset" && req.method === "POST") {
+      resetGrid(String(body.scope ?? ""));
+      const info = gridInfo(String(body.scope));
+      manager.emit("layout", { scope: info.scope, source: null });
+      return info;
     }
     if (p === "/api/shutdown" && req.method === "POST") {
       setTimeout(() => {
@@ -1262,6 +1907,10 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         return new Response(uiHtml.replace("{{SERVEDEV_TOKEN}}", token).replace("{{SERVEDEV_BUILD}}", UI_BUILD), {
           headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
         });
+      }
+      // JSON Schemas for servedev.json and config.json (editor autocomplete, validation).
+      if (url.pathname === "/schema/servedev.schema.json" || url.pathname === "/schema/config.schema.json") {
+        return Response.json(url.pathname.includes("servedev.") ? repoSchema : localSchema);
       }
       if (!url.pathname.startsWith("/api/")) return new Response("not found", { status: 404 });
       if (url.pathname !== "/api/health") {

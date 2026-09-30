@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 /** The .git directory for a folder: the nearest .git above it, following a worktree's "gitdir:" file. */
-function gitDir(dir: string): string | undefined {
+export function gitDir(dir: string): string | undefined {
   let cur = path.resolve(dir);
   while (true) {
     const dotGit = path.join(cur, ".git");

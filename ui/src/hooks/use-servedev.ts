@@ -1,12 +1,14 @@
 import * as React from "react"
 
-import { CLIENT_ID, streamUrl, type Configured, type Profile, type Server } from "@/lib/api"
+import { CLIENT_ID, streamUrl, type ConfigSummary, type Configured, type Profile, type Server } from "@/lib/api"
 
 /** Live server state from the daemon's event stream. */
 export function useServedev() {
   const [servers, setServers] = React.useState<Map<string, Server>>(new Map())
   const [configured, setConfigured] = React.useState<Configured[]>([])
   const [profiles, setProfiles] = React.useState<Profile[]>([])
+  /** Config files and problems in them (a syntax error keeps the last good version in use). */
+  const [config, setConfig] = React.useState<ConfigSummary | null>(null)
   const [connected, setConnected] = React.useState<boolean | null>(null)
   /** Last grid layout changed by someone else (an agent, the CLI, another tab). */
   const [layoutChange, setLayoutChange] = React.useState<{ scope: string; at: number } | null>(null)
@@ -16,7 +18,7 @@ export function useServedev() {
   React.useEffect(() => {
     const es = new EventSource(streamUrl("/api/stream/events"))
     es.addEventListener("snapshot", (e) => {
-      const d = JSON.parse(e.data) as { build?: string; servers: Server[]; configured: Configured[]; profiles: Profile[] }
+      const d = JSON.parse(e.data) as { build?: string; servers: Server[]; configured: Configured[]; profiles: Profile[]; config?: ConfigSummary }
       // The daemon was updated while this tab stayed open: load the new dashboard.
       const mine = document.querySelector<HTMLMetaElement>('meta[name="servedev-build"]')?.content
       if (d.build && mine && !mine.startsWith("{{") && d.build !== mine) {
@@ -26,6 +28,7 @@ export function useServedev() {
       setServers(new Map(d.servers.map((s) => [s.id, s])))
       setConfigured(d.configured)
       setProfiles(d.profiles ?? [])
+      setConfig(d.config ?? null)
       setConnected(true)
     })
     es.addEventListener("server", (e) => {
@@ -42,6 +45,7 @@ export function useServedev() {
       })
     })
     es.addEventListener("profiles", (e) => setProfiles(JSON.parse(e.data) as Profile[]))
+    es.addEventListener("config", (e) => setConfig(JSON.parse(e.data) as ConfigSummary))
     es.addEventListener("layout", (e) => {
       const { scope, source } = JSON.parse(e.data) as { scope: string; source: string | null }
       if (source !== CLIENT_ID) setLayoutChange({ scope, at: Date.now() })
@@ -51,7 +55,7 @@ export function useServedev() {
     return () => es.close()
   }, [])
 
-  return { servers, configured, profiles, connected, layoutChange, accountsVersion }
+  return { servers, configured, profiles, config, connected, layoutChange, accountsVersion }
 }
 
 /** Current time, refreshed on an interval, for uptime labels. */

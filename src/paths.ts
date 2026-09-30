@@ -10,6 +10,8 @@ export const LOG_DIR = path.join(HOME, "logs");
 /** Pre-SQLite state; imported into the database once, then renamed. */
 export const STATE_FILE = path.join(HOME, "state.json");
 export const DB_FILE = path.join(HOME, "servedev.db");
+/** Your configuration: projects, your servers and profiles, your changes to shared ones, settings. */
+export const LOCAL_CONFIG = path.join(HOME, "config.json");
 export const TOKEN_FILE = path.join(HOME, "token");
 export const DAEMON_LOG = path.join(HOME, "daemon.log");
 export const DAEMON_PORT = Number(process.env.SERVEDEV_PORT ?? 7777);

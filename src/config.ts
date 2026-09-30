@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { Selections } from "./accounts/registry";
-import { gitBranch, gitInfo, repoIdentity } from "./git";
+import { gitBranch, gitDir, gitInfo, repoIdentity } from "./git";
 import { applyChanges, deepEqual, hashText, parseJsonc, writeAtomic, type ParseIssue } from "./jsonc";
 import { CONFIG_FILE, normalizeReady, type GridTile, type ProjectConfig, type ReadySpec, type ServerConfig, type SharedProfileConfig } from "./project";
 import { maskSecrets } from "./sanitize";
@@ -59,6 +59,8 @@ export interface ProjectEntry {
   path: string;
   /** Normalized git remote, so `servedev setup` can find the repo on another machine. */
   remote?: string;
+  /** For a git worktree: the branch it was created for (another machine needs the same worktree). */
+  worktree?: string;
 }
 
 /** ~/.servedev/config.json */
@@ -158,6 +160,8 @@ export class ConfigStore extends EventEmitter {
   private pollTimer?: ReturnType<typeof setInterval>;
   private debounce?: ReturnType<typeof setTimeout>;
   private statusOf = new Map<string, boolean>();
+  /** mtimes of each repo's git HEAD and index: a checkout or commit changes the branch or what's uncommitted. */
+  private gitStamps = new Map<string, { head: number; index: number }>();
 
   constructor(readonly localFile: string) {
     super();
@@ -269,8 +273,27 @@ export class ConfigStore extends EventEmitter {
       }
     }
     for (const root of [...this.repoDocs.keys()]) if (!roots.includes(root)) this.repoDocs.delete(root);
+    let branchMoved = false;
+    for (const root of roots) {
+      const dir = gitDir(root);
+      if (!dir) continue;
+      const mtime = (f: string) => {
+        try {
+          return fs.statSync(path.join(dir, f)).mtimeMs;
+        } catch {
+          return 0;
+        }
+      };
+      const now = { head: mtime("HEAD"), index: mtime("index") };
+      const was = this.gitStamps.get(root);
+      this.gitStamps.set(root, now);
+      if (!was) continue;
+      if (now.index !== was.index || now.head !== was.head) this.checkGit(root);
+      if (now.head !== was.head) branchMoved = true;
+    }
     if (roots.join("\n") !== before) this.syncWatchers();
-    if (changed.length) this.emit("change", changed);
+    // A branch switch changes profiles' branch tags even when servedev.json stays the same.
+    if (changed.length || branchMoved) this.emit("change", changed);
     return changed;
   }
 
@@ -333,10 +356,11 @@ export class ConfigStore extends EventEmitter {
     // "local:" prefixes your own profiles' ids.
     if (label === "local") label = "local-project";
     if (this.local.projects?.[label]) label = `${label}-${crypto.createHash("sha1").update(root).digest("hex").slice(0, 4)}`;
-    const remote = gitInfo(root)?.remote;
+    const git = gitInfo(root);
+    const branch = git?.worktree ? gitBranch(root) : undefined;
     this.editLocal((c) => {
       c.projects ??= {};
-      c.projects[label] = { path: root, ...(remote ? { remote } : {}) };
+      c.projects[label] = { path: root, ...(git?.remote ? { remote: git.remote } : {}), ...(branch ? { worktree: branch } : {}) };
     });
     return label;
   }
@@ -473,12 +497,15 @@ function pick<K extends keyof ServerConfig>(local: Partial<ServerConfig> | undef
   return repo?.[key];
 }
 
-/** Account picks merged field by field: `over` wins. */
+/** Account picks merged field by field: `over` wins where it has a value. */
 export function mergeSelections(base: Selections = {}, over: Selections = {}): Selections {
   const out: Selections = {};
   for (const id of new Set([...Object.keys(base), ...Object.keys(over)])) {
-    const merged = { ...(base[id] ?? {}), ...(over[id] ?? {}) };
-    const clean = Object.fromEntries(Object.entries(merged).filter(([, v]) => typeof v === "string" && v !== ""));
+    const merged: Record<string, string> = {};
+    for (const src of [base[id] ?? {}, over[id] ?? {}]) {
+      for (const [k, v] of Object.entries(src)) if (typeof v === "string" && v !== "") merged[k] = v;
+    }
+    const clean = merged;
     if (Object.keys(clean).length) out[id] = clean;
   }
   return out;
@@ -544,7 +571,12 @@ export function resolveConfig(store: ConfigStore): Resolved {
       }
       const command = pick(l, r, "command");
       if (typeof command !== "string" || !command.trim()) {
-        warn(file, `server "${name}" in ${info.label} has no "command"`);
+        warn(
+          file,
+          !r && l
+            ? `your settings for "${name}" in ${info.label} have nothing to apply to: ${CONFIG_FILE} here doesn't define it (another branch?) and they don't include a "command"`
+            : `server "${name}" in ${info.label} has no "command"`,
+        );
         continue;
       }
       const cwd = pick(l, r, "cwd");
@@ -609,7 +641,8 @@ export function resolveConfig(store: ConfigStore): Resolved {
       const ids = names.filter((n) => servers.has(idOf(n))).map(idOf);
       const repoGrid = validTiles(pc.grid);
       const myGrid = override.grid ? validTiles(override.grid) : undefined;
-      const tiles = (myGrid ?? repoGrid).filter((t) => servers.has(idOf(t.i))).map((t) => ({ ...t, i: idOf(t.i) }));
+      // Servers you skip don't get a tile either.
+      const tiles = (myGrid ?? repoGrid).filter((t) => servers.has(idOf(t.i)) && !skip.has(t.i)).map((t) => ({ ...t, i: idOf(t.i) }));
       if (tiles.length || myGrid) grids.set(`profile:${id}`, tiles);
       profiles.push({
         id,

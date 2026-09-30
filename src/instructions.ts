@@ -16,6 +16,8 @@ It runs each server in the background, waits until it is ready, and keeps logs.
 
 With the servedev MCP server connected, the same things (and profiles, custom grids, pins, custom hostnames, taking over servers started elsewhere) are tools; \`list_servers\` also shows servers running outside servedev, which explains a port that's already taken.
 
+Config: servers and shared profiles live in the repo's \`servedev.json\` (JSON with comments; commit it to share, teammates get them on clone); the user's own servers, profiles, pins and settings live in \`~/.servedev/config.json\`. Both are watched live, so editing them directly is fine. \`servedev config status\` shows problems; \`servedev config where <name>\` says which file an edit goes to. Don't put personal accounts (emails) in servedev.json.
+
 Cloud accounts: \`servedev account\` shows this machine's Google Cloud / GitHub accounts; a profile can give its servers other ones (\`servedev profile accounts <profile> gcloud.account=<email>\`) without changing the machine's. Other platforms (AWS, Docker, …) can be added with \`servedev account catalog\` / \`account add <id>\`, or a custom JSON provider (\`account test --file\` first). Don't switch the machine's accounts (\`account use\`) unless asked. If a server gets permission errors from Google or GitHub, check which account it ran with in \`servedev status <name>\`.
 
 Environment: servers get a fresh login-shell environment at every start, plus only the variables set on purpose (\`--env KEY=VALUE\`, or \`env\` in servedev.json) — not the environment of the shell you run servedev in. To share a server with the team, \`servedev save <name>\` writes it into the repo's servedev.json (credentials in the command are stripped).

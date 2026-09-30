@@ -2,6 +2,7 @@
  * Operations shared by the CLI and the MCP server. Each returns agent-friendly text
  * plus structured data; neither writes to stdout.
  */
+import path from "node:path";
 import { api } from "./client";
 import type { ProcessGroup, RunInfo, SearchResponse, StartResponse } from "./daemon";
 import type { Preset } from "./logs";
@@ -248,6 +249,18 @@ export async function opList(a: { cwd: string; all?: boolean }): Promise<OpResul
   return { ok: true, text, data: { servers: mine, configured: idle, outside } };
 }
 
+/** Where a server's definition lives: the repo's servedev.json, your config.json, or both. */
+function describeSource(s: PublicServer): string {
+  const src = s.source ?? { repo: s.config !== "missing", local: s.config !== "defined" };
+  if (src.repo && !src.local) return "servedev.json (shared with the repo)";
+  if (src.repo) {
+    return s.config === "differs"
+      ? "servedev.json, with your changes in ~/.servedev/config.json (servedev save --force puts them in the repo)"
+      : "servedev.json, plus your own variables in ~/.servedev/config.json";
+  }
+  return "only ~/.servedev/config.json (yours; servedev save puts it in the repo's servedev.json)";
+}
+
 export async function opStatus(a: { cwd: string; name?: string }): Promise<OpResult> {
   const q = new URLSearchParams({ root: findRoot(a.cwd), ...(a.name ? { name: a.name } : {}) });
   const r = await api<{ server: PublicServer; lines: string[] }>(`/api/logs?${q}&tail=15`);
@@ -270,7 +283,7 @@ export async function opStatus(a: { cwd: string; name?: string }): Promise<OpRes
     `  cwd:      ${s.cwd}`,
     ...(s.branch ? [`  branch:   ${s.branch}`] : []),
     ...(s.vars?.length ? [`  env:      ${s.vars.map((v) => `${v.name}=${v.preview}`).join(" ")} (set on purpose; the rest comes from your login shell)`] : []),
-    `  config:   ${s.config === "defined" ? "defined in servedev.json" : s.config === "differs" ? "differs from servedev.json (servedev save --force to update it)" : "not in servedev.json (servedev save to add it)"}`,
+    `  config:   ${describeSource(s)}`,
     ...(s.accounts
       ? [`  accounts: ${describeSelections(s.accounts.selections)} (from profile ${s.accounts.profile.name}${s.accountsStale ? "; the profile changed since, restart to apply" : ""})`]
       : []),
@@ -455,10 +468,27 @@ export async function opAutostart(enable?: boolean): Promise<OpResult> {
 }
 
 interface ProfileInfo {
-  id: number;
+  /** "local:<name>" for yours; "<project>:<name>" for one shared in a repo's servedev.json. */
+  id: string;
   name: string;
+  kind: "local" | "shared";
+  description?: string;
   servers: string[];
+  skipped: string[];
+  missing: string[];
   accounts: Record<string, Record<string, string>>;
+  needs?: Record<string, Record<string, string>>;
+  mine?: Record<string, Record<string, string>>;
+  project?: string;
+  branch?: string;
+  file: string;
+  uncommitted?: boolean;
+  grid: { source: "repo" | "override" | "local" | null; hasRepoDefault: boolean; hasOverride: boolean };
+}
+
+/** "Full stack (shared in capcon-apps, main)" / "Mine (yours)" */
+function profileLabel(p: ProfileInfo): string {
+  return p.kind === "shared" ? `${p.name} (shared in ${p.project}${p.branch ? `, ${p.branch}` : ""}${p.uncommitted ? ", uncommitted changes" : ""})` : `${p.name} (yours)`;
 }
 
 /** "gcloud account=me@x.com project=p; github user=me" */
@@ -475,38 +505,71 @@ export async function opProfiles(): Promise<OpResult> {
     api<{ profiles: ProfileInfo[] }>("/api/profiles"),
     api<{ servers: PublicServer[] }>("/api/servers"),
   ]);
-  if (!profiles.length) return { ok: true, text: "No profiles yet. Create one with: servedev profile create <name> --running", data: profiles };
+  if (!profiles.length) {
+    return {
+      ok: true,
+      text: "No profiles yet. Create one with: servedev profile create <name> --running (add --shared to put it in the repo's servedev.json)",
+      data: profiles,
+    };
+  }
   const byId = new Map(servers.map((s) => [s.id, s]));
   const lines = profiles.map((p) => {
     const running = p.servers.filter((id) => ["running", "starting"].includes(byId.get(id)?.status ?? "")).length;
     const members = p.servers.map((id) => `${SYMBOL[byId.get(id)?.status ?? "stopped"] ?? " "} ${id}`).join("\n    ");
-    const accounts = Object.keys(p.accounts ?? {}).length ? `\n    accounts: ${describeSelections(p.accounts)}` : "";
-    return `${p.name} (${running}/${p.servers.length} running)${accounts}\n    ${members || "(no servers)"}`;
+    const extra = [
+      p.description ? `    ${p.description}` : "",
+      Object.keys(p.accounts ?? {}).length ? `    accounts: ${describeSelections(p.accounts)}` : "",
+      p.skipped.length ? `    skipped by you: ${p.skipped.join(", ")}` : "",
+      p.missing.length ? `    not defined: ${p.missing.join(", ")}` : "",
+    ].filter(Boolean);
+    return `${p.id}  ${profileLabel(p)} (${running}/${p.servers.length} running)\n${extra.map((l) => l + "\n").join("")}    ${members || "(no servers)"}`;
   });
-  return { ok: true, text: lines.join("\n"), data: profiles };
+  const text =
+    lines.join("\n") +
+    "\n\nShared profiles live in the repo's servedev.json (commit to share changes); yours live in ~/.servedev/config.json. Refer to a profile by name, or by id when a shared one exists in several worktrees.";
+  return { ok: true, text, data: profiles };
 }
 
 export async function opProfile(a: {
   cwd: string;
-  action: "create" | "add" | "remove" | "rename" | "delete" | "start" | "set" | "accounts";
+  action: "create" | "add" | "remove" | "rename" | "delete" | "start" | "set" | "accounts" | "needs" | "skip" | "share" | "duplicate";
   name: string;
   servers?: string[];
   running?: boolean;
   rename?: string;
   /** Account picks by provider; a provider set to null goes back to this machine's accounts. */
   accounts?: Record<string, Record<string, string> | null>;
+  /** create: put it in the project's servedev.json, shared with everyone on the repo. */
+  shared?: boolean;
+  project?: string;
+  description?: string;
 }): Promise<OpResult> {
   const root = findRoot(a.cwd);
+  const describe = (p: ProfileInfo) => `${profileLabel(p)}: ${p.servers.join(", ") || "no servers"}${p.kind === "shared" ? `\n(in ${p.file})` : ""}`;
   switch (a.action) {
     case "accounts": {
       const { profile } = await api<{ profile: ProfileInfo }>("/api/profiles/update", { profile: a.name, mergeAccounts: a.accounts ?? {} });
       return {
         ok: true,
         text:
-          `${profile.name} servers use: ${describeSelections(profile.accounts)}.\n` +
+          `${profile.name} servers use: ${describeSelections(profile.accounts)}${profile.kind === "shared" ? " (your picks are in your config; the repo's needs stay as they are)" : ""}.\n` +
           `Applies when they next start; running ones show as needing a restart.`,
         data: profile,
       };
+    }
+    case "needs": {
+      const current = await findProfile(a.name);
+      const needs: Record<string, Record<string, string>> = JSON.parse(JSON.stringify(current.needs ?? {}));
+      for (const [id, sel] of Object.entries(a.accounts ?? {})) {
+        if (sel === null) delete needs[id];
+        else needs[id] = { ...(needs[id] ?? {}), ...sel };
+      }
+      const { profile } = await api<{ profile: ProfileInfo }>("/api/profiles/update", { profile: current.id, needs });
+      return { ok: true, text: `${profileLabel(profile)} needs: ${describeSelections(profile.needs ?? {})}. Commit ${profile.file} to share it.`, data: profile };
+    }
+    case "skip": {
+      const { profile } = await api<{ profile: ProfileInfo }>("/api/profiles/update", { root, profile: a.name, skip: a.servers ?? [] });
+      return { ok: true, text: `${describe(profile)}${profile.skipped.length ? `\nskipped by you: ${profile.skipped.join(", ")}` : ""}`, data: profile };
     }
     case "create": {
       const { profile } = await api<{ profile: ProfileInfo }>("/api/profiles", {
@@ -515,12 +578,31 @@ export async function opProfile(a: {
         servers: a.servers,
         running: a.running,
         accounts: a.accounts ?? undefined,
+        shared: a.shared,
+        project: a.project,
+        description: a.description,
       });
-      return { ok: true, text: `created profile ${profile.name} with ${profile.servers.length} server${profile.servers.length === 1 ? "" : "s"}: ${profile.servers.join(", ") || "none"}`, data: profile };
+      return { ok: true, text: `created ${describe(profile)}`, data: profile };
+    }
+    case "share": {
+      const r = await api<{ profile: ProfileInfo; savedServers: string[]; notes: string[] }>("/api/profiles/share", { profile: a.name, project: a.project });
+      return {
+        ok: true,
+        text:
+          `${r.profile.name} is now shared in ${r.profile.file}.` +
+          (r.savedServers.length ? `\nAlso added to servedev.json (teammates need them): ${r.savedServers.join(", ")}` : "") +
+          (r.notes.length ? `\n${r.notes.map((n) => `note: ${n}`).join("\n")}` : "") +
+          `\nCommit servedev.json to share it.`,
+        data: r,
+      };
+    }
+    case "duplicate": {
+      const { profile } = await api<{ profile: ProfileInfo }>("/api/profiles/duplicate", { profile: a.name, name: a.rename });
+      return { ok: true, text: `created ${describe(profile)}; change it freely, it's only in your config.`, data: profile };
     }
     case "set": {
       const { profile } = await api<{ profile: ProfileInfo }>("/api/profiles/update", { root, profile: a.name, servers: a.servers ?? [] });
-      return { ok: true, text: `${profile.name}: ${profile.servers.join(", ") || "no servers"} (start order)`, data: profile };
+      return { ok: true, text: `${describe(profile)} (start order)`, data: profile };
     }
     case "add":
     case "remove":
@@ -530,11 +612,11 @@ export async function opProfile(a: {
         profile: a.name,
         [a.action]: a.action === "rename" ? a.rename : a.servers,
       });
-      return { ok: true, text: `${profile.name}: ${profile.servers.join(", ") || "no servers"}`, data: profile };
+      return { ok: true, text: describe(profile), data: profile };
     }
     case "delete": {
-      const r = await api<{ deleted: string }>("/api/profiles/delete", { profile: a.name });
-      return { ok: true, text: `deleted profile ${r.deleted} (its servers are untouched)`, data: r };
+      const r = await api<{ deleted: string; file: string }>("/api/profiles/delete", { profile: a.name });
+      return { ok: true, text: `deleted profile ${r.deleted} from ${r.file} (its servers are untouched)`, data: r };
     }
     case "start": {
       const r = await api<{ profile: ProfileInfo; results: { id: string; ok: boolean; alreadyRunning?: boolean; url?: string; reason?: string }[] }>(
@@ -605,10 +687,20 @@ async function resolveServerIds(cwd: string, refs: string[]): Promise<string[]> 
   });
 }
 
+/** By id, or by name (yours first; a shared name in several worktrees needs the id). */
 async function findProfile(name: string): Promise<ProfileInfo> {
   const { profiles } = await api<{ profiles: ProfileInfo[] }>("/api/profiles");
-  const p = profiles.find((x) => x.name.toLowerCase() === name.toLowerCase());
-  if (!p) throw new Error(`no profile "${name}" (have: ${profiles.map((x) => x.name).join(", ") || "none"})`);
+  const byId = profiles.find((x) => x.id === name);
+  if (byId) return byId;
+  const named = profiles.filter((x) => x.name.toLowerCase() === name.toLowerCase());
+  const p = named.find((x) => x.kind === "local") ?? (named.length === 1 ? named[0] : undefined);
+  if (!p) {
+    throw new Error(
+      named.length > 1
+        ? `"${name}" is shared in several worktrees; use an id: ${named.map((x) => x.id).join(", ")}`
+        : `no profile "${name}" (have: ${profiles.map((x) => x.id).join(", ") || "none"})`,
+    );
+  }
   return p;
 }
 
@@ -682,10 +774,14 @@ async function gridScope(profile?: string): Promise<{ scope: string; profile?: P
 
 const readingOrder = (items: GridTile[]) => [...items].sort((a, b) => a.y - b.y || a.x - b.x).map((t) => t.i);
 
-/** Save tiles; for a profile's grid also make its servers (and start order) match the tiles. */
-async function saveGrid(scope: string, profile: ProfileInfo | undefined, items: GridTile[]) {
-  await api("/api/layouts", { scope, items });
-  if (profile) await api("/api/profiles/update", { id: profile.id, servers: readingOrder(items) });
+/**
+ * Save tiles. For one of your profiles, its servers (and start order) follow the tiles. A shared
+ * profile's servers are the team's (servedev.json), so only your arrangement is saved, unless
+ * `repo` saves it as the default layout everyone gets.
+ */
+async function saveGrid(scope: string, profile: ProfileInfo | undefined, items: GridTile[], repo = false) {
+  await api("/api/layouts", { scope, items, target: repo ? "repo" : undefined });
+  if (profile?.kind === "local") await api("/api/profiles/update", { id: profile.id, servers: readingOrder(items) });
 }
 
 function describeGrid(label: string, items: GridTile[], statuses: Map<string, string>): string {
@@ -701,7 +797,9 @@ export async function opGetGrid(a: { profile?: string }): Promise<OpResult> {
     api<{ servers: ServerRow[] }>("/api/servers"),
   ]);
   const statuses = new Map(servers.map((s) => [s.id, s.status]));
-  const label = profile ? `Grid of profile ${profile.name}` : "The unsaved grid";
+  const label = profile
+    ? `Grid of ${profileLabel(profile)}${profile.kind === "shared" ? ` (${profile.grid.hasOverride ? "your arrangement; reset_grid goes back to the repo's" : profile.grid.hasRepoDefault ? "the repo's default layout" : "no layout yet"})` : ""}`
+    : "The unsaved grid";
   return { ok: true, text: describeGrid(label, items ?? [], statuses), data: { scope, items: items ?? [] } };
 }
 
@@ -712,6 +810,8 @@ export async function opSetGrid(a: {
   columns?: number;
   height?: number;
   tiles?: { server: string; x: number; y: number; w: number; h: number }[];
+  /** A shared profile: make this the default layout in servedev.json. */
+  repo?: boolean;
 }): Promise<OpResult> {
   const { scope, profile } = await gridScope(a.profile);
   let items: GridTile[];
@@ -732,7 +832,7 @@ export async function opSetGrid(a: {
     items = ids.map((id, k) => ({ i: id, x: (k % cols) * w, y: Math.floor(k / cols) * h, w, h }));
   }
   if (new Set(items.map((t) => t.i)).size !== items.length) throw new Error("each server can only be on the grid once");
-  await saveGrid(scope, profile, items);
+  await saveGrid(scope, profile, items, a.repo);
   return opGetGrid({ profile: a.profile });
 }
 
@@ -765,6 +865,13 @@ export async function opUpdateGrid(a: {
     ids.forEach((id, k) => items.push({ i: id, x: (k % 2) * 6, y: bottom + Math.floor(k / 2) * TILE_H, w: 6, h: TILE_H }));
   }
   await saveGrid(scope, profile, items);
+  return opGetGrid({ profile: a.profile });
+}
+
+/** Drop your arrangement of a shared profile's grid, back to the repo's default. */
+export async function opResetGrid(a: { profile: string }): Promise<OpResult> {
+  const { scope } = await gridScope(a.profile);
+  await api("/api/layouts/reset", { scope });
   return opGetGrid({ profile: a.profile });
 }
 
@@ -1028,3 +1135,89 @@ export async function opSave(a: { cwd: string; name?: string; force?: boolean; i
   return { ok: true, text: `${preview.join("\n")}${secrets}\nSaved. Commit ${plan.file} to share it; teammates run \`servedev up\`.`, data: r };
 }
 
+
+// ---------- configuration files ----------
+
+interface ConfigSummary {
+  file: string;
+  issues: { level: string; file: string; line?: number; column?: number; message: string }[];
+  files: { file: string; kind: string; exists: boolean; error?: { line: number; column: number; message: string } }[];
+}
+
+/** Where configuration lives, and anything wrong with it. */
+export async function opConfigStatus(): Promise<OpResult> {
+  const r = await api<ConfigSummary>("/api/config/status");
+  const files = r.files.map((f) => `  ${f.kind === "local" ? "yours " : "shared"}  ${f.file}${f.exists ? "" : " (none yet)"}${f.error ? `  ✗ line ${f.error.line}: ${f.error.message}` : ""}`);
+  const issues = r.issues.map((i) => `  ${i.level === "error" ? "✗" : "⚠"} ${i.file}${i.line ? `:${i.line}${i.column ? `:${i.column}` : ""}` : ""}: ${i.message}`);
+  const text = [
+    "Config files (JSON with comments; edits show up in the dashboard right away):",
+    ...files,
+    issues.length ? `\nProblems:\n${issues.join("\n")}` : "\nNo problems.",
+    "\nShared (servedev.json, in each repo): servers, shared profiles, default grids. Yours (config.json): projects, your own servers and profiles, your changes to shared ones, pins, grids, settings.",
+  ].join("\n");
+  return { ok: !r.issues.some((i) => i.level === "error"), text, data: r };
+}
+
+/** Where a server or profile is defined, and which file an edit goes to. */
+export async function opWhere(a: { cwd: string; name: string }): Promise<OpResult> {
+  const [{ profiles }, { servers }] = await Promise.all([
+    api<{ profiles: ProfileInfo[] }>("/api/profiles"),
+    api<{ servers: (PublicServer & { source?: { repo: boolean; local: boolean } })[] }>("/api/servers"),
+  ]);
+  const root = findRoot(a.cwd);
+  const lines: string[] = [];
+  const s = servers.find((x) => x.id === a.name) ?? servers.find((x) => x.root === root && x.name === a.name);
+  if (s) {
+    const src = s.source ?? { repo: false, local: true };
+    lines.push(
+      `server ${s.id}: ${src.repo && src.local ? `defined in ${s.root}/servedev.json, with your changes in ~/.servedev/config.json` : src.repo ? `defined in ${s.root}/servedev.json (shared)` : "defined in ~/.servedev/config.json (yours; servedev save puts it in the repo)"}`,
+    );
+  }
+  for (const p of profiles.filter((x) => x.id === a.name || x.name.toLowerCase() === a.name.toLowerCase())) {
+    lines.push(`profile ${p.id}: ${p.kind === "shared" ? `shared in ${p.file}${p.uncommitted ? " (uncommitted changes)" : ""}; your changes to it (accounts, grid, skipped servers) are in ~/.servedev/config.json` : `yours, in ${p.file}`}`);
+  }
+  if (!lines.length) throw new Error(`no server or profile "${a.name}"`);
+  return { ok: true, text: lines.join("\n"), data: { server: s, profiles } };
+}
+
+interface SetupResult {
+  projects: { project: string; was: string; remote?: string; status: "ok" | "found" | "missing"; path?: string; how?: string; reason?: string }[];
+  applied: boolean;
+  scanned: boolean;
+  accounts: { profile: string; error: string }[];
+  issues: ConfigSummary["issues"];
+  file: string;
+}
+
+/** A new machine: find each project's repo here (by git remote) and fix the paths in config.json. */
+export async function opSetup(a: { apply?: boolean; map?: Record<string, string>; roots?: string[] }): Promise<OpResult> {
+  const r = await api<SetupResult>("/api/setup", { apply: a.apply, map: a.map, roots: a.roots });
+  const rows = r.projects.map((p) =>
+    p.status === "ok"
+      ? `  ✓ ${p.project}: ${p.path}`
+      : p.status === "found"
+        ? `  ${r.applied ? "✓" : "→"} ${p.project}: ${p.was} → ${p.path} (found by ${p.how})`
+        : `  ✗ ${p.project}: ${p.reason}${p.remote && p.reason?.includes("isn't cloned") ? `. Clone ${p.remote}, then run setup again (or --map ${p.project}=<path>)` : ""}`,
+  );
+  const found = r.projects.filter((p) => p.status === "found").length;
+  const missing = r.projects.filter((p) => p.status === "missing").length;
+  const lines = [
+    `Projects in ${r.file}:`,
+    ...(rows.length ? rows : ["  (none yet; start a server or add a folder)"]),
+    found && !r.applied ? `\n${found} moved; run again with --apply to update config.json.` : "",
+    missing ? `${missing} not found here.` : "",
+    r.accounts.length ? `\nAccounts to set up:\n${r.accounts.map((x) => `  ${x.profile}: ${x.error}`).join("\n")}` : "",
+    r.issues.length ? `\nConfig problems:\n${r.issues.map((i) => `  ${i.file}${i.line ? `:${i.line}` : ""}: ${i.message}`).join("\n")}` : "",
+  ].filter(Boolean);
+  return { ok: missing === 0 && !r.accounts.length, text: lines.join("\n"), data: r };
+}
+
+/** Track a folder (and its servedev.json's servers and shared profiles) without starting anything. */
+export async function opAddProject(a: { cwd: string; path?: string }): Promise<OpResult> {
+  const r = await api<{ project: string; root: string; servers: string[]; profiles: string[] }>("/api/projects/add", { root: a.path ? path.resolve(a.cwd, a.path) : a.cwd });
+  return {
+    ok: true,
+    text: `Tracking ${r.project} (${r.root}): ${r.servers.length} server${r.servers.length === 1 ? "" : "s"}${r.servers.length ? ` (${r.servers.join(", ")})` : ""}, ${r.profiles.length} shared profile${r.profiles.length === 1 ? "" : "s"}${r.profiles.length ? ` (${r.profiles.join(", ")})` : ""}.`,
+    data: r,
+  };
+}

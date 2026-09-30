@@ -23,7 +23,7 @@ const plural = (n: number) => `${n} ${n === 1 ? "server" : "servers"}`
  * Start all / Stop all for whatever the dashboard is showing: every server, a profile (in its
  * start order), or a custom grid. Both confirm first and list the servers they'll touch.
  */
-export function BulkActions({ servers, scope, profileId }: { servers: Server[]; scope: string; profileId?: number }) {
+export function BulkActions({ servers, scope, profileId }: { servers: Server[]; scope: string; profileId?: string }) {
   const [confirm, setConfirm] = React.useState<"start" | "stop" | null>(null)
   const toStart = servers.filter((s) => !ACTIVE.includes(s.status))
   const toStop = servers.filter((s) => s.status === "running" || s.status === "starting")

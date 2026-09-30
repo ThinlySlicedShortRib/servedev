@@ -26,6 +26,11 @@ import {
   opStopOutside,
   opTakeOver,
   opUpdateGrid,
+  opResetGrid,
+  opConfigStatus,
+  opWhere,
+  opAddProject,
+  opSetup,
   opAccounts,
   opSave,
   opAccountUse,
@@ -36,6 +41,7 @@ import {
   opAccountTest,
   type OpResult,
 } from "./ops";
+import { api } from "./client";
 import { VERSION } from "./paths";
 
 const cwdProp = {
@@ -44,7 +50,11 @@ const cwdProp = {
 
 const serverRef = { type: "string", description: 'Server name in this project, or a full id like "keel-review:dev".' };
 const serverList = { type: "array", items: { type: "string" }, description: 'Server names (in this project) or ids like "keel-review:dev".' };
-const profileRef = { type: "string", description: "Profile name (case-insensitive)." };
+const profileRef = {
+  type: "string",
+  description:
+    'Profile name (case-insensitive), or its id from list_profiles: "local:<name>" for the user\'s own, "<project>:<name>" for one shared in a repo\'s servedev.json (needed when several worktrees share one by the same name).',
+};
 const gridProfile = {
   type: "string",
   description: "Profile whose grid to use. Omit for the unsaved grid (the dashboard's Custom grid view with no profile selected).",
@@ -219,14 +229,44 @@ const TOOLS = [
     inputSchema: obj({ profile: profileRef, servers: serverList, all: { type: "boolean", description: "Every server servedev tracks." }, ...cwdProp }),
   },
   // ---------- profiles ----------
-  { name: "list_profiles", description: "List profiles (named sets of servers, possibly across projects) with their servers in start order.", inputSchema: obj({}) },
+  {
+    name: "list_profiles",
+    description:
+      "List profiles with their servers in start order. Two kinds: the user's own (in ~/.servedev/config.json, any servers from any project) " +
+      "and shared ones (in a repo's servedev.json, committed for everyone on the repo; one per worktree, tagged with its branch).",
+    inputSchema: obj({}),
+  },
   {
     name: "create_profile",
-    description: "Create a profile from servers (in start order), or from whatever is running now. To also arrange them on a grid, use set_grid with the profile afterwards.",
+    description:
+      "Create a profile from servers (in start order), or from whatever is running now. By default it's the user's own; shared=true puts it in the " +
+      "project's servedev.json for the whole team (servers must all be from that project; personal accounts like emails stay out of it). " +
+      "To also arrange them on a grid, use set_grid with the profile afterwards.",
     inputSchema: obj(
-      { name: { type: "string" }, servers: serverList, from_running: { type: "boolean", description: "Use every server running now." }, accounts: accountPicks, ...cwdProp },
+      {
+        name: { type: "string" },
+        servers: serverList,
+        from_running: { type: "boolean", description: "Use every server running now." },
+        accounts: accountPicks,
+        shared: { type: "boolean", description: "Put it in the repo's servedev.json (commit it to share)." },
+        project: { type: "string", description: "For shared: the project (defaults to the servers' project)." },
+        description: { type: "string" },
+        ...cwdProp,
+      },
       ["name"],
     ),
+  },
+  {
+    name: "share_profile",
+    description:
+      "Move one of the user's own profiles into its repo's servedev.json so everyone on the repo gets it. Servers only defined in the user's config are " +
+      "written to servedev.json too (credentials and machine paths left out). Account picks naming a person stay in the user's config. Tell the user to commit servedev.json.",
+    inputSchema: obj({ name: profileRef, project: { type: "string", description: "Only needed if unclear." } }, ["name"]),
+  },
+  {
+    name: "duplicate_profile",
+    description: "Copy a profile (typically a shared one) as the user's own, to change freely without touching the repo.",
+    inputSchema: obj({ name: profileRef, new_name: { type: "string" } }, ["name"]),
   },
   {
     name: "update_profile",
@@ -237,7 +277,14 @@ const TOOLS = [
       {
         name: profileRef,
         rename: { type: "string" },
-        accounts: accountPicks,
+        accounts: { ...accountPicks, description: accountPicks.description + " For a shared profile these are the user's own picks (kept in their config)." },
+        needs: {
+          ...accountPicks,
+          description:
+            'Shared profiles only: what its servers need, written to servedev.json for everyone, e.g. {"gcloud": {"project": "acme-dev"}}. Never put personal accounts (emails) here. null removes a provider.',
+        },
+        skip: { ...serverList, description: "Shared profiles only: servers the user doesn't start with it (their own choice, kept in their config). [] clears." },
+        description: { type: "string" },
         servers: { ...serverList, description: "New full list of servers, in start order." },
         add: serverList,
         remove: serverList,
@@ -246,7 +293,11 @@ const TOOLS = [
       ["name"],
     ),
   },
-  { name: "delete_profile", description: "Delete a profile and its grid. Its servers are not touched.", inputSchema: obj({ name: profileRef }, ["name"]) },
+  {
+    name: "delete_profile",
+    description: "Delete a profile and its grid. Its servers are not touched. A shared profile is removed from servedev.json (for everyone once committed), so only when asked.",
+    inputSchema: obj({ name: profileRef }, ["name"]),
+  },
   {
     name: "start_profile",
     description: "Start every server in a profile, in order, waiting for each. Servers not in the profile keep running.",
@@ -265,9 +316,11 @@ const TOOLS = [
     description:
       "Lay out a custom grid, replacing its tiles. Simplest: `servers` plus `columns` (1-4; tiles fill left to right, top to bottom). " +
       "Or give exact `tiles` (x 0-11, w 1-12 with x + w <= 12, y and h in rows of ~44px; a normal tile is 6 wide, 9 high). " +
-      "For a profile's grid this also sets the profile's servers and start order. The dashboard updates live.",
+      "For the user's own profile this also sets its servers and start order. For a shared profile it saves the user's own arrangement " +
+      "(repo=true instead makes it the default layout in servedev.json for everyone). The dashboard updates live.",
     inputSchema: obj({
       profile: gridProfile,
+      repo: { type: "boolean", description: "Shared profile: save as the repo's default layout (servedev.json)." },
       servers: serverList,
       columns: { type: "number", description: "Tiles per row when laying out `servers` (default 2)." },
       height: { type: "number", description: "Tile height in rows when laying out `servers` (default 9)." },
@@ -327,6 +380,41 @@ const TOOLS = [
     inputSchema: obj({ ids: { type: "array", items: { type: "string" }, description: 'Ids from list_servers, e.g. "ext:2423". Default: all hung servers.' } }),
   },
   // ---------- settings ----------
+  {
+    name: "reset_grid",
+    description: "Drop the user's own arrangement of a shared profile's grid, going back to the default layout from servedev.json.",
+    inputSchema: obj({ profile: profileRef }, ["profile"]),
+  },
+  // ---------- configuration files ----------
+  {
+    name: "config_status",
+    description:
+      "Where servedev's configuration lives (~/.servedev/config.json for the user's setup, each repo's servedev.json for shared servers and profiles) " +
+      "and any problems: syntax errors (with file:line; servedev keeps using the last good version), unknown servers in profiles, emails in shared files. " +
+      "Both files are JSON with comments, watched live: editing them directly is fine.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "where_defined",
+    description: "Which file defines a server or profile, i.e. where an edit to it goes (repo servedev.json, the user's config.json, or both).",
+    inputSchema: obj({ name: { type: "string", description: "Server name/id or profile name/id." }, ...cwdProp }, ["name"]),
+  },
+  {
+    name: "add_project",
+    description: "Track a folder without starting anything: its servedev.json's servers and shared profiles show up (in the dashboard too).",
+    inputSchema: obj({ path: { type: "string", description: "Folder (default: cwd)." }, ...cwdProp }),
+  },
+  {
+    name: "setup_machine",
+    description:
+      "On a new machine where ~/.servedev/config.json was copied over (e.g. from dotfiles): find each project's repo here by git remote and report " +
+      "what moved, what isn't cloned, and which profiles' accounts need signing in. Preview by default; apply=true updates the paths.",
+    inputSchema: obj({
+      apply: { type: "boolean" },
+      map: { type: "object", additionalProperties: { type: "string" }, description: 'project (or remote, or folder name) -> path, e.g. {"capcon-apps": "~/code/capcon-apps"}' },
+      roots: { type: "array", items: { type: "string" }, description: "Extra folders to look in." },
+    }),
+  },
   { name: "get_settings", description: "servedev settings: log retention, proxy port, and whether it starts at login.", inputSchema: obj({}) },
   {
     name: "list_accounts",
@@ -462,15 +550,45 @@ async function callTool(name: string, a: Args): Promise<OpResult> {
     case "list_profiles":
       return opProfiles();
     case "create_profile":
-      return opProfile({ cwd, action: "create", name: a.name, servers: a.servers, running: a.from_running, accounts: a.accounts });
+      return opProfile({
+        cwd,
+        action: "create",
+        name: a.name,
+        servers: a.servers,
+        running: a.from_running,
+        accounts: a.accounts,
+        shared: a.shared,
+        project: a.project,
+        description: a.description,
+      });
+    case "share_profile":
+      return opProfile({ cwd, action: "share", name: a.name, project: a.project });
+    case "duplicate_profile":
+      return opProfile({ cwd, action: "duplicate", name: a.name, rename: a.new_name });
+    case "reset_grid":
+      return opResetGrid({ profile: a.profile });
+    case "config_status":
+      return opConfigStatus();
+    case "where_defined":
+      return opWhere({ cwd, name: a.name });
+    case "add_project":
+      return opAddProject({ cwd, path: a.path });
+    case "setup_machine":
+      return opSetup({ apply: a.apply, map: a.map, roots: a.roots });
     case "update_profile": {
       let r: OpResult | undefined;
       if (a.servers) r = await opProfile({ cwd, action: "set", name: a.name, servers: a.servers });
       if (a.add?.length) r = await opProfile({ cwd, action: "add", name: a.name, servers: a.add });
       if (a.remove?.length) r = await opProfile({ cwd, action: "remove", name: a.name, servers: a.remove });
       if (a.accounts) r = await opProfile({ cwd, action: "accounts", name: a.name, accounts: a.accounts });
+      if (a.needs) r = await opProfile({ cwd, action: "needs", name: a.name, accounts: a.needs });
+      if (a.skip) r = await opProfile({ cwd, action: "skip", name: a.name, servers: a.skip });
+      if (a.description !== undefined) {
+        await api("/api/profiles/update", { profile: a.name, description: a.description });
+        r ??= await opProfiles();
+      }
       if (a.rename) r = await opProfile({ cwd, action: "rename", name: a.name, rename: a.rename });
-      if (!r) throw new Error("nothing to change: pass rename, servers, add, remove or accounts");
+      if (!r) throw new Error("nothing to change: pass rename, servers, add, remove, accounts, needs, skip or description");
       return r;
     }
     case "delete_profile":
@@ -480,7 +598,7 @@ async function callTool(name: string, a: Args): Promise<OpResult> {
     case "get_grid":
       return opGetGrid({ profile: a.profile });
     case "set_grid":
-      return opSetGrid({ cwd, profile: a.profile, servers: a.servers, columns: a.columns, height: a.height, tiles: a.tiles });
+      return opSetGrid({ cwd, profile: a.profile, servers: a.servers, columns: a.columns, height: a.height, tiles: a.tiles, repo: a.repo });
     case "update_grid":
       return opUpdateGrid({ cwd, profile: a.profile, add: a.add, remove: a.remove, move: a.move });
     case "save_grid_as_profile":

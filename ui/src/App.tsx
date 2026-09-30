@@ -1,8 +1,10 @@
 import * as React from "react"
-import { FolderOpenIcon, LayoutGridIcon, SaveIcon, ServerIcon, SquareIcon, TriangleAlertIcon } from "lucide-react"
+import { FolderOpenIcon, LayoutGridIcon, MoreHorizontalIcon, RotateCcwIcon, SaveIcon, ServerIcon, SquareIcon, TriangleAlertIcon, UploadIcon } from "lucide-react"
 
 import { AccountsSheet } from "@/components/accounts-sheet"
 import { AppSidebar } from "@/components/app-sidebar"
+import { ConfigIssues } from "@/components/config-issues"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Hint, TruncatedText } from "@/components/hint"
 import { BulkActions } from "@/components/bulk-actions"
 import { ExternalDetail } from "@/components/external-detail"
@@ -10,7 +12,7 @@ import { GridView } from "@/components/grid-view"
 import { HungServers } from "@/components/hung-servers"
 import { NewServerDialog } from "@/components/new-server-dialog"
 import { ProfileDialog } from "@/components/profile-dialog"
-import { ProfileSwitcher } from "@/components/profile-switcher"
+import { ProfileSwitcher, shareTarget } from "@/components/profile-switcher"
 import { SaveGridDialog } from "@/components/save-grid-dialog"
 import { ServerDetail } from "@/components/server-detail"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -51,21 +53,29 @@ function loadView(): View {
   }
 }
 
-function loadProfileId(): number | null {
+/** The profile last shown. Ids are strings now ("local:Mine"); an old numeric one is resolved by the daemon. */
+function loadProfileId(): string | null {
   try {
-    const v = localStorage.getItem(PROFILE_KEY)
-    return v ? Number(v) : null
+    return localStorage.getItem(PROFILE_KEY) || null
   } catch {
     return null
   }
 }
 
 export function App() {
-  const { servers, configured, profiles, connected, layoutChange, accountsVersion } = useServedev()
+  const { servers, configured, profiles, config, connected, layoutChange, accountsVersion } = useServedev()
   const accounts = useAccounts(accountsVersion)
   const now = useNow()
-  const [profileId, setProfileId] = React.useState<number | null>(loadProfileId)
+  const [profileId, setProfileId] = React.useState<string | null>(loadProfileId)
   const activeProfile = profiles.find((p) => p.id === profileId)
+  // A profile saved before profiles moved to config files: its old numeric id maps to a new one.
+  React.useEffect(() => {
+    if (!profileId || !/^\d+$/.test(profileId) || !connected) return
+    api<{ id: string }>(`/api/profiles/resolve?${new URLSearchParams({ ref: profileId })}`)
+      .then((r) => switchProfile(r.id))
+      .catch(() => switchProfile(null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, connected])
   const [view, setViewState] = React.useState<View>(loadView)
   const setView = (v: View) => {
     setViewState(v)
@@ -93,6 +103,46 @@ export function App() {
 
   const [editing, setEditing] = React.useState<{ profile?: Profile } | null>(null)
   const [deleting, setDeleting] = React.useState<Profile | null>(null)
+  const [sharing, setSharing] = React.useState<Profile | null>(null)
+
+  async function shareProfile(p: Profile) {
+    try {
+      const r = await api<{ profile: Profile; savedServers: string[]; notes: string[] }>("/api/profiles/share", { id: p.id })
+      switchProfile(r.profile.id)
+      toast.success(`${p.name} is shared in ${r.profile.project}`, {
+        description:
+          `Commit servedev.json to share it with the team.` +
+          (r.savedServers.length ? ` Also added to it: ${r.savedServers.join(", ")}.` : "") +
+          (r.notes.length ? ` ${r.notes.join(" ")}` : ""),
+        duration: 10_000,
+      })
+    } catch (e) {
+      toast.error(`Couldn't share ${p.name}`, { description: (e as Error).message })
+    }
+  }
+
+  async function duplicateProfile(p: Profile) {
+    try {
+      const r = await api<{ profile: Profile }>("/api/profiles/duplicate", { id: p.id })
+      switchProfile(r.profile.id)
+      toast.success(`Made ${r.profile.name}`, { description: "It's yours, in your config: change it freely." })
+    } catch (e) {
+      toast.error(`Couldn't copy ${p.name}`, { description: (e as Error).message })
+    }
+  }
+
+  async function gridAction(action: "reset" | "repo") {
+    if (!activeProfile) return
+    try {
+      if (action === "reset") await api("/api/layouts/reset", { scope: grid.scope })
+      else await api("/api/layouts", { scope: grid.scope, items: grid.items ?? [], target: "repo" })
+      toast.success(action === "reset" ? "Back to the repo's layout" : `Saved as ${activeProfile.name}'s default layout`, {
+        description: action === "repo" ? "It's in servedev.json: commit it to share it." : undefined,
+      })
+    } catch (e) {
+      toast.error("Couldn't update the grid", { description: (e as Error).message })
+    }
+  }
   const [removingProject, setRemovingProject] = React.useState<{ project: string; entries: Entry[] } | null>(null)
 
   async function removeProject(r: { project: string; entries: Entry[] }) {
@@ -107,7 +157,7 @@ export function App() {
     }
   }
 
-  function switchProfile(id: number | null) {
+  function switchProfile(id: string | null) {
     setProfileId(id)
     try {
       if (id === null) localStorage.removeItem(PROFILE_KEY)
@@ -173,6 +223,8 @@ export function App() {
               onNew={() => setEditing({})}
               onEdit={(p) => setEditing({ profile: p })}
               onDelete={setDeleting}
+              onShare={setSharing}
+              onDuplicate={duplicateProfile}
               gridMode={view === "grid"}
             />
             <BulkActions servers={bulkServers} scope={bulk.scope} profileId={activeProfile?.id} />
@@ -197,7 +249,9 @@ export function App() {
             className="text-sm text-muted-foreground"
             text={view === "grid"
               ? activeProfile
-                ? `${activeProfile.name}: changes save to the profile`
+                ? activeProfile.kind === "shared"
+                  ? `${activeProfile.name}: ${activeProfile.grid.hasOverride ? "your layout (only you see it)" : "the repo's layout; changes are yours only"}`
+                  : `${activeProfile.name}: changes save to the profile`
                 : "Unsaved grid"
               : current
                 ? `${current.project} / ${current.name}`
@@ -205,6 +259,34 @@ export function App() {
           />
           <div className="ml-auto flex items-center gap-2">
             <AccountsSheet />
+            {view === "grid" && activeProfile?.kind === "shared" && (
+              <DropdownMenu>
+                <Hint label="This grid's layout: yours, or the repo's default everyone starts from">
+                  <DropdownMenuTrigger render={<Button size="sm" variant="outline" aria-label="Layout options" />}>
+                    <MoreHorizontalIcon data-icon="inline-start" />
+                    <span className="max-sm:hidden">Layout</span>
+                  </DropdownMenuTrigger>
+                </Hint>
+                <DropdownMenuContent align="end" className="w-72">
+                  <DropdownMenuItem disabled={!activeProfile.grid.hasOverride} onClick={() => gridAction("reset")}>
+                    <RotateCcwIcon />
+                    <div className="grid leading-tight">
+                      <span>Reset to the repo's layout</span>
+                      <span className="text-xs text-muted-foreground">
+                        {activeProfile.grid.hasOverride ? "Drops your arrangement" : "You're already on the repo's layout"}
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => gridAction("repo")}>
+                    <UploadIcon />
+                    <div className="grid leading-tight">
+                      <span>Save as the repo's default layout</span>
+                      <span className="text-xs text-muted-foreground">Writes it to servedev.json for everyone (commit to share)</span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             {view === "grid" && !activeProfile && (grid.items?.length ?? 0) > 0 && (
               <Hint label="Keep this grid: save its servers and layout as a profile you can reopen and start in one click">
                 <Button size="sm" onClick={() => setSavingGrid(true)}>
@@ -229,6 +311,8 @@ export function App() {
             </ToggleGroup>
           </div>
         </header>
+
+        {connected && config && <ConfigIssues config={config} />}
 
         {connected === false && (
           <Alert variant="destructive" className="m-4 w-auto md:mx-6">
@@ -340,13 +424,32 @@ export function App() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
-            <AlertDialogDescription>Only the profile is removed. Its servers keep running and stay in the list.</AlertDialogDescription>
+            <AlertDialogDescription>
+              {deleting?.kind === "shared"
+                ? `It's removed from ${deleting.project}'s servedev.json, so once you commit, nobody on the repo has it. Your own changes to it go too. Its servers keep running and stay in the list.`
+                : "Only the profile is removed. Its servers keep running and stay in the list."}
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={() => deleting && deleteProfile(deleting)}>
               Delete profile
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={sharing !== null} onOpenChange={(o) => !o && setSharing(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Share {sharing?.name} with the repo?</AlertDialogTitle>
+            <AlertDialogDescription>
+              It moves into {sharing && shareTarget(sharing, servers)}'s servedev.json, so everyone who clones the repo gets it once you commit. Servers only
+              you have defined are added to servedev.json too, without credentials. Account picks that name a person (emails) stay yours.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => sharing && shareProfile(sharing)}>Share with the repo</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -1,11 +1,12 @@
 /**
- * SQLite persistence: server definitions, one row per run, log write-time marks (for --since
- * across daemon restarts), and settings. Log text itself stays in files, one per run.
+ * SQLite: what happens, not what's configured (that's in JSON files, see config.ts). One row per
+ * server with its current run and a cached copy of the definition it last ran with, one row per
+ * run, log write-time marks (for --since across daemon restarts), and internal "meta" values.
+ * Log text itself stays in files, one per run.
  */
 import { Database } from "bun:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-import type { Selections } from "./accounts/registry";
 import type { Server, Status } from "./manager";
 import type { ReadySpec } from "./project";
 
@@ -24,15 +25,6 @@ export interface Run {
   stoppedAt?: number;
   logFile: string;
 }
-
-export const SETTINGS = {
-  log_retention_days: { default: "7", describe: "Delete logs of runs that stopped more than this many days ago." },
-  proxy_port: {
-    default: "80",
-    describe: "Port for custom hostnames like keel.localhost. 80 gives URLs without a port; falls back to 7780 when 80 is taken.",
-  },
-} as const;
-export type SettingKey = keyof typeof SETTINGS;
 
 const MIGRATIONS = [
   `CREATE TABLE servers (
@@ -98,26 +90,10 @@ const MIGRATIONS = [
   // Platform accounts: a profile's picks (by provider), and what a server's current run started with.
   `ALTER TABLE profiles ADD COLUMN accounts TEXT NOT NULL DEFAULT '{}';
    ALTER TABLE servers ADD COLUMN accounts TEXT;`,
+  // Hostnames are configuration now (config.json / servedev.json); the row only caches one, so a
+  // hostname moving between servers mustn't trip a uniqueness check here.
+  `DROP INDEX IF EXISTS servers_by_hostname;`,
 ];
-
-/** A tile in the dashboard grid: server id, position/size in grid units, and what it shows. */
-export interface LayoutItem {
-  i: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  mode?: "logs" | "preview";
-}
-
-export interface Profile {
-  id: number;
-  name: string;
-  /** Server ids in start order. */
-  servers: string[];
-  /** Accounts its servers use instead of the machine's, by provider id, e.g. { gcloud: { account: "me@x.com" } }. */
-  accounts: Selections;
-}
 
 type Row = Record<string, any>;
 
@@ -351,92 +327,7 @@ export class Store {
     return r?.offset ?? 0;
   }
 
-  // ---------- profiles ----------
-
-  profiles(): Profile[] {
-    const rows = this.db.query("SELECT id, name, accounts FROM profiles ORDER BY name COLLATE NOCASE").all() as Row[];
-    const members = this.db.query("SELECT server_id FROM profile_servers WHERE profile_id = ? ORDER BY position");
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      servers: (members.all(r.id) as Row[]).map((m) => m.server_id),
-      accounts: JSON.parse(r.accounts),
-    }));
-  }
-
-  profile(ref: string | number): Profile | undefined {
-    return this.profiles().find((p) => p.id === Number(ref) || p.name.toLowerCase() === String(ref).toLowerCase());
-  }
-
-  createProfile(name: string, servers: string[], accounts: Selections = {}): Profile {
-    const row = this.db
-      .query("INSERT INTO profiles (name, accounts, created_at) VALUES (?, ?, ?) RETURNING id")
-      .get(name, JSON.stringify(accounts), Date.now()) as Row;
-    this.setProfileServers(row.id, servers);
-    return this.profile(row.id)!;
-  }
-
-  updateProfile(id: number, changes: { name?: string; servers?: string[]; accounts?: Selections }): Profile {
-    this.db.transaction(() => {
-      if (changes.name !== undefined) this.db.query("UPDATE profiles SET name = ? WHERE id = ?").run(changes.name, id);
-      if (changes.accounts) this.db.query("UPDATE profiles SET accounts = ? WHERE id = ?").run(JSON.stringify(changes.accounts), id);
-      if (changes.servers) this.setProfileServers(id, changes.servers);
-    })();
-    return this.profile(id)!;
-  }
-
-  private setProfileServers(id: number, servers: string[]) {
-    this.db.query("DELETE FROM profile_servers WHERE profile_id = ?").run(id);
-    const add = this.db.query("INSERT INTO profile_servers (profile_id, server_id, position) VALUES (?, ?, ?)");
-    [...new Set(servers)].forEach((s, i) => add.run(id, s, i));
-  }
-
-  deleteProfile(id: number) {
-    this.db.query("DELETE FROM profiles WHERE id = ?").run(id);
-  }
-
-  // ---------- grid layouts ----------
-
-  getLayout(scope: string): LayoutItem[] | undefined {
-    const r = this.db.query("SELECT items FROM layouts WHERE scope = ?").get(scope) as Row | null;
-    return r ? JSON.parse(r.items) : undefined;
-  }
-
-  setLayout(scope: string, items: LayoutItem[]) {
-    this.db
-      .query("INSERT INTO layouts (scope, items, updated_at) VALUES (?, ?, ?) ON CONFLICT(scope) DO UPDATE SET items = excluded.items, updated_at = excluded.updated_at")
-      .run(scope, JSON.stringify(items), Date.now());
-  }
-
-  /** Take removed servers off every saved grid. Returns the scopes that changed. */
-  dropFromLayouts(ids: string[]): string[] {
-    const drop = new Set(ids);
-    const changed: string[] = [];
-    for (const r of this.db.query("SELECT scope, items FROM layouts").all() as Row[]) {
-      const items = JSON.parse(r.items) as LayoutItem[];
-      const kept = items.filter((it) => !drop.has(it.i));
-      if (kept.length !== items.length) {
-        this.setLayout(r.scope, kept);
-        changed.push(r.scope);
-      }
-    }
-    return changed;
-  }
-
-  deleteLayout(scope: string) {
-    this.db.query("DELETE FROM layouts WHERE scope = ?").run(scope);
-  }
-
-  // ---------- settings ----------
-
-  getSetting(key: SettingKey): string {
-    const r = this.db.query("SELECT value FROM settings WHERE key = ?").get(key) as Row | null;
-    return r?.value ?? SETTINGS[key].default;
-  }
-
-  setSetting(key: SettingKey, value: string) {
-    this.db.query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
-  }
+  // ---------- meta ----------
 
   /** Internal state kept in the settings table under "meta:" keys (not user settings). */
   getMeta(key: string): string | undefined {

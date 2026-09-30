@@ -3,8 +3,35 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ConfigConflict, configState, editConfigFile, planSave, saveToConfig, serverToConfig } from "../src/config-file";
+import { ConfigConflict, ConfigStore } from "../src/config";
+import { configState as stateOf, mergedEntry, planSave as plan, serverToConfig } from "../src/config-file";
 import type { Server } from "../src/manager";
+import { loadConfig } from "../src/project";
+
+// What the daemon does for "Save to servedev.json", through the watched config store.
+const stores: ConfigStore[] = [];
+function storeFor(root: string) {
+  const store = new ConfigStore(path.join(root, ".local-config.json"));
+  stores.push(store);
+  return store;
+}
+const current = (s: Server) => {
+  try {
+    return loadConfig(s.root).servers?.[s.name];
+  } catch {
+    return undefined;
+  }
+};
+const configState = (s: Server) => stateOf(s, current(s));
+const planSave = (s: Server) => plan(s, current(s));
+function saveToConfig(s: Server, opts: { force?: boolean } = {}) {
+  const store = storeFor(s.root);
+  const p = plan(s, store.repo(s.root).servers?.[s.name]);
+  if (p.state === "defined") return { ...p, written: false };
+  if (p.state === "differs" && !opts.force) throw new ConfigConflict("differs");
+  store.editRepo(s.root, (c) => ((c.servers ??= {})[s.name] = mergedEntry(p)));
+  return { ...p, written: true };
+}
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
@@ -54,7 +81,10 @@ describe("saveToConfig", () => {
     expect(configState(s)).toBe("missing");
     const r = saveToConfig(s);
     expect(r.written).toBe(true);
-    expect(JSON.parse(fs.readFileSync(path.join(root, "servedev.json"), "utf8"))).toEqual({ servers: { web: { command: "pnpm dev", cwd: "apps/web" } } });
+    expect(JSON.parse(fs.readFileSync(path.join(root, "servedev.json"), "utf8"))).toEqual({
+      $schema: expect.stringContaining("servedev.schema.json"),
+      servers: { web: { command: "pnpm dev", cwd: "apps/web" } },
+    });
     expect(configState(s)).toBe("defined");
     expect(saveToConfig(s).written).toBe(false);
   });
@@ -83,7 +113,7 @@ describe("saveToConfig", () => {
 
   test("refuses to overwrite a servedev.json that isn't valid JSON", () => {
     const root = project(undefined, "{ nope");
-    expect(() => saveToConfig(server(root))).toThrow(/isn't valid JSON/);
+    expect(() => saveToConfig(server(root))).toThrow(/syntax error at line 1/);
   });
 });
 
@@ -110,12 +140,12 @@ test("saving never writes credentials from the command, and makes tool paths por
   expect(JSON.stringify(proxy)).not.toContain("ya29.a0");
 });
 
-test("editConfigFile keeps unknown keys and tab indentation", () => {
+test("editRepo keeps unknown keys, comments and tab indentation", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sd-config-"));
   dirs.push(root);
-  fs.writeFileSync(path.join(root, "servedev.json"), '{\n\t"profiles": {"a": 1},\n\t"servers": {}\n}\n');
-  editConfigFile(root, (c) => (c.servers.web = { command: "x" }));
+  fs.writeFileSync(path.join(root, "servedev.json"), '{\n\t// ours\n\t"profiles": {"a": {"servers": []}},\n\t"servers": {}\n}\n');
+  storeFor(root).editRepo(root, (c) => (c.servers!.web = { command: "x" }));
   const text = fs.readFileSync(path.join(root, "servedev.json"), "utf8");
-  expect(text.startsWith('{\n\t"profiles"')).toBe(true);
-  expect(JSON.parse(text)).toEqual({ profiles: { a: 1 }, servers: { web: { command: "x" } } });
+  expect(text).toContain('\t// ours\n\t"profiles"');
+  expect(loadConfig(root)).toEqual({ profiles: { a: { servers: [] } }, servers: { web: { command: "x" } } });
 });

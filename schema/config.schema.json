@@ -1,0 +1,428 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/servedev/servedev/main/schema/config.schema.json",
+  "title": "servedev config.json",
+  "description": "Your servedev setup (~/.servedev/config.json): where your projects are, your own servers and profiles, your changes to shared ones, pins, grids and settings. JSON with comments; keep it to yourself or in a private dotfiles repo.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "log_retention_days": {
+          "type": "number",
+          "minimum": 1,
+          "default": 7,
+          "description": "Delete logs of runs that stopped more than this many days ago."
+        },
+        "proxy_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 80,
+          "description": "Port for custom hostnames like keel.localhost."
+        }
+      }
+    },
+    "projects": {
+      "type": "object",
+      "description": "Project name -> folder. Server ids are \"<project>:<server>\". `servedev setup` fixes paths on a new machine by git remote.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string",
+            "description": "Normalized git remote, e.g. github.com/acme/app."
+          },
+          "worktree": {
+            "type": "string",
+            "description": "For a git worktree: its branch, so `servedev setup` can say how to recreate it."
+          }
+        }
+      }
+    },
+    "servers": {
+      "type": "object",
+      "description": "Project -> server name -> a server of your own, or your changes to one defined in the repo's servedev.json (null clears a repo value).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "Shell command. {port} is replaced by the assigned port; $PORT is set too."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "setup": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "Runs before the command on every start, e.g. \"pnpm install\"."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cwd": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "Folder to run in, relative to the project (the folder with servedev.json)."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "port": {
+              "anyOf": [
+                {
+                  "description": "A port number, or \"auto\" for a free one.",
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    {
+                      "const": "auto"
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "env": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "description": "Variables for the server. Put secrets in an .env file the app reads, not here.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ready": {
+              "anyOf": [
+                {
+                  "description": "When the server counts as ready. Default: once it listens on a TCP port.",
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "port",
+                        "none"
+                      ],
+                      "description": "\"none\": as soon as it spawns (workers, watchers)."
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "mode": {
+                          "enum": [
+                            "port",
+                            "none"
+                          ]
+                        },
+                        "log": {
+                          "type": "string",
+                          "description": "Regex matched against the log, e.g. \"ready in\"."
+                        },
+                        "url": {
+                          "type": "string",
+                          "description": "URL or path (e.g. \"/health\") that must answer with a status < 500."
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "timeout": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "description": "Seconds to wait until ready (default 60, or 300 with a setup step)."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "hostname": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "Custom hostname served by servedev's proxy, e.g. \"web.localhost\"."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "dependsOn": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Servers `servedev up` starts first."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Your own profiles: any servers, from any project or worktree.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "servers"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Server ids (\"project:name\") in start order."
+          },
+          "accounts": {
+            "type": "object",
+            "description": "Accounts its servers use instead of this machine's, e.g. {\"gcloud\": {\"account\": \"me@x.com\"}}.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "grid": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "i",
+                "x",
+                "y",
+                "w",
+                "h"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "i": {
+                  "type": "string",
+                  "description": "The server (a name in servedev.json; an id like \"project:name\" in config.json)."
+                },
+                "x": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 11,
+                  "description": "Column, 0-11."
+                },
+                "y": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Row (about 44px each)."
+                },
+                "w": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12,
+                  "description": "Width in columns (a normal tile is 6)."
+                },
+                "h": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Height in rows (a normal tile is 9)."
+                },
+                "mode": {
+                  "enum": [
+                    "logs",
+                    "preview"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "description": "Repo (git remote, or folder:<name>) -> shared profile name -> your changes. They apply in every worktree of the repo.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accounts": {
+              "type": "object",
+              "description": "Your account picks, on top of what the profile needs.",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "grid": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "i",
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "i": {
+                    "type": "string",
+                    "description": "The server (a name in servedev.json; an id like \"project:name\" in config.json)."
+                  },
+                  "x": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 11,
+                    "description": "Column, 0-11."
+                  },
+                  "y": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Row (about 44px each)."
+                  },
+                  "w": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12,
+                    "description": "Width in columns (a normal tile is 6)."
+                  },
+                  "h": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Height in rows (a normal tile is 9)."
+                  },
+                  "mode": {
+                    "enum": [
+                      "logs",
+                      "preview"
+                    ]
+                  }
+                }
+              },
+              "description": "Your arrangement (tiles by server name)."
+            },
+            "skip": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Server names you don't start with it."
+            }
+          }
+        }
+      }
+    },
+    "pinned": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Server ids that stay on top and start at login."
+    },
+    "grid": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "i",
+          "x",
+          "y",
+          "w",
+          "h"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "i": {
+            "type": "string",
+            "description": "The server (a name in servedev.json; an id like \"project:name\" in config.json)."
+          },
+          "x": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 11,
+            "description": "Column, 0-11."
+          },
+          "y": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Row (about 44px each)."
+          },
+          "w": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12,
+            "description": "Width in columns (a normal tile is 6)."
+          },
+          "h": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Height in rows (a normal tile is 9)."
+          },
+          "mode": {
+            "enum": [
+              "logs",
+              "preview"
+            ]
+          }
+        }
+      },
+      "description": "The unsaved custom grid (tiles by server id)."
+    }
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/servedev/servedev/main/schema/servedev.schema.json",
+  "title": "servedev.json",
+  "description": "A repo's dev servers and shared profiles, for servedev (https://github.com/servedev/servedev). Shared with everyone who clones the repo; JSON with comments.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "servers": {
+      "type": "object",
+      "description": "Server name -> how to run it.",
+      "propertyNames": {
+        "pattern": "^[\\w.-]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command. {port} is replaced by the assigned port; $PORT is set too."
+          },
+          "setup": {
+            "type": "string",
+            "description": "Runs before the command on every start, e.g. \"pnpm install\"."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Folder to run in, relative to the project (the folder with servedev.json)."
+          },
+          "port": {
+            "description": "A port number, or \"auto\" for a free one.",
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              {
+                "const": "auto"
+              }
+            ]
+          },
+          "env": {
+            "type": "object",
+            "description": "Variables for the server. Put secrets in an .env file the app reads, not here.",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "ready": {
+            "description": "When the server counts as ready. Default: once it listens on a TCP port.",
+            "oneOf": [
+              {
+                "enum": [
+                  "port",
+                  "none"
+                ],
+                "description": "\"none\": as soon as it spawns (workers, watchers)."
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "port",
+                      "none"
+                    ]
+                  },
+                  "log": {
+                    "type": "string",
+                    "description": "Regex matched against the log, e.g. \"ready in\"."
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "URL or path (e.g. \"/health\") that must answer with a status < 500."
+                  }
+                }
+              }
+            ]
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Seconds to wait until ready (default 60, or 300 with a setup step)."
+          },
+          "hostname": {
+            "type": "string",
+            "description": "Custom hostname served by servedev's proxy, e.g. \"web.localhost\"."
+          },
+          "dependsOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Servers `servedev up` starts first."
+          }
+        }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Shared profiles: sets of this repo's servers started together. Everyone can pick their own accounts, skip servers and arrange the grid on top, in their own config.",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "servers"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Server names from \"servers\", in start order."
+          },
+          "accounts": {
+            "type": "object",
+            "description": "What the servers need, without anyone's identity, e.g. {\"gcloud\": {\"project\": \"acme-dev\"}}. Personal accounts (emails) belong in each person's own config.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "grid": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "i",
+                "x",
+                "y",
+                "w",
+                "h"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "i": {
+                  "type": "string",
+                  "description": "The server (a name in servedev.json; an id like \"project:name\" in config.json)."
+                },
+                "x": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 11,
+                  "description": "Column, 0-11."
+                },
+                "y": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Row (about 44px each)."
+                },
+                "w": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12,
+                  "description": "Width in columns (a normal tile is 6)."
+                },
+                "h": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Height in rows (a normal tile is 9)."
+                },
+                "mode": {
+                  "enum": [
+                    "logs",
+                    "preview"
+                  ]
+                }
+              }
+            },
+            "description": "Default dashboard grid (tiles by server name)."
+          }
+        }
+      }
+    }
+  }
+}

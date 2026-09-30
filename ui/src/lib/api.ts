@@ -30,13 +30,31 @@ export interface Server {
   /** Git branch checked out in its project folder. */
   branch?: string
   /** Accounts its current run started with, when a profile picked them. */
-  accounts?: { profile: { id: number; name: string }; selections: Selections }
+  accounts?: { profile: { id: string; name: string }; selections: Selections }
   /** Its profile picked different accounts since it started; a restart applies them. */
   accountsStale?: boolean
   /** How it compares to its repo's servedev.json. */
   config?: "defined" | "differs" | "missing"
   /** Variables set on purpose for it (values masked); the rest comes from the login shell. */
   vars?: { name: string; preview: string; secret: boolean }[]
+  /** Where it's defined: the repo's servedev.json, your config.json, or both (your changes on top). */
+  source?: { repo: boolean; local: boolean }
+}
+
+/** A problem in a config file (servedev keeps using the last version that parsed). */
+export interface ConfigIssue {
+  level: "error" | "warning"
+  file: string
+  line?: number
+  column?: number
+  message: string
+}
+
+export interface ConfigSummary {
+  /** ~/.servedev/config.json */
+  file: string
+  issues: ConfigIssue[]
+  files: { file: string; kind: "local" | "repo"; exists: boolean; error?: { line: number; column: number; message: string } }[]
 }
 
 /** What saving a server into servedev.json would do, from /api/config. */
@@ -76,13 +94,37 @@ export interface ProcessGroup {
 /** Picks by provider id, then field id: { gcloud: { account: "me@x.com" } }. */
 export type Selections = Record<string, Record<string, string>>
 
+/**
+ * A named set of servers started together. Yours ("local:<name>") live in ~/.servedev/config.json
+ * and can mix any servers; shared ones ("<project>:<name>") live in a repo's servedev.json, one per
+ * worktree, and everyone on the repo gets them.
+ */
 export interface Profile {
-  id: number
+  id: string
   name: string
-  /** Server ids in start order. */
+  kind: "local" | "shared"
+  description?: string
+  /** Server ids it starts, in order (skipped and missing ones left out). */
   servers: string[]
-  /** Accounts its servers use instead of this machine's. */
+  /** Shared: servers you don't start with it (your choice, in your config). */
+  skipped: string[]
+  /** Listed but not defined (anymore). */
+  missing: string[]
+  /** What its servers get: the repo's needs with your picks on top. */
   accounts: Selections
+  /** Shared: what servedev.json says the servers need. */
+  needs?: Selections
+  /** Shared: your own picks. */
+  mine?: Selections
+  project?: string
+  root?: string
+  branch?: string
+  file: string
+  /** Shared: servedev.json has changes git hasn't committed. */
+  uncommitted?: boolean
+  /** Version of its file, so an edit doesn't overwrite a newer one. */
+  version: string
+  grid: { source: "repo" | "override" | "local" | null; hasRepoDefault: boolean; hasOverride: boolean }
 }
 
 export interface AccountOption {

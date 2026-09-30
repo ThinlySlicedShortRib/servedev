@@ -16,6 +16,12 @@ import {
   opPin,
   opProfile,
   opProfiles,
+  opConfigStatus,
+  opWhere,
+  opResetGrid,
+  opGetGrid,
+  opSetup,
+  opAddProject,
   opSave,
   opAccounts,
   opAccountUse,
@@ -63,8 +69,13 @@ Usage:
   servedev hostname [name] [host|--clear]   custom URL like http://keel.localhost (proxied to the real port)
   servedev cleanup                          stop hung servers: ones still running from deleted folders (e.g. removed worktrees)
   servedev autostart [on|off]               the login item that starts pinned servers
-  servedev profile [ls]                     profiles: named sets of servers across projects
-  servedev profile create <profile> [servers...] [--running]
+  servedev add [path]                       track a folder: its servedev.json's servers and shared profiles appear
+  servedev profile [ls]                     profiles: yours (any servers) and shared ones from repos' servedev.json
+  servedev profile create <profile> [servers...] [--running] [--shared [--project p]]
+  servedev profile share <profile>          move one of yours into its repo's servedev.json (commit to share)
+  servedev profile duplicate <profile> [new-name]   copy a shared profile as one of yours
+  servedev profile skip <shared profile> [servers...]   servers of a shared profile you don't start
+  servedev profile needs <shared profile> gcloud.project=<id>   what its servers need (no personal accounts)
   servedev profile add|remove <profile> <servers...>
   servedev profile rename <profile> <new-name>
   servedev profile start <profile>          start its servers in order (others keep running)
@@ -84,6 +95,10 @@ Usage:
   servedev mcp                              run as an MCP server over stdio
   servedev instructions                     print a snippet for CLAUDE.md / AGENTS.md
   servedev config [key] [value]             settings, e.g. servedev config log_retention_days 14
+  servedev config status                    config files (~/.servedev/config.json, servedev.json) and problems in them
+  servedev config where <server|profile>    which file defines it
+  servedev grid [profile] / grid reset <profile>   show a grid / drop your layout of a shared profile's grid
+  servedev setup [dirs...] [--apply] [--map project=path]   new machine: find your projects' repos by git remote
   servedev daemon [status|stop|restart]
 
 Start options:
@@ -209,6 +224,11 @@ async function main() {
       file: { type: "string" },
       replace: { type: "boolean" },
       override: { type: "boolean" },
+      shared: { type: "boolean" },
+      project: { type: "string" },
+      description: { type: "string" },
+      apply: { type: "boolean" },
+      map: { type: "string", multiple: true },
     },
   });
 
@@ -321,16 +341,24 @@ async function main() {
         result = await opProfile({ cwd, action: "accounts", name, accounts: parseAccountPicks(rest) });
         break;
       }
-      const actions = ["create", "add", "remove", "rename", "delete", "start", "up", "accounts"];
+      if (action === "needs") {
+        if (!name) throw new Error("usage: servedev profile needs <shared profile> gcloud.project=<id> ...");
+        result = await opProfile({ cwd, action: "needs", name, accounts: parseAccountPicks(rest) });
+        break;
+      }
+      const actions = ["create", "add", "remove", "rename", "delete", "start", "up", "accounts", "needs", "skip", "share", "duplicate"];
       if (!actions.includes(action) || !name) throw new Error(`usage: servedev profile ${actions.join("|")} <profile> ...`);
       if (action === "rename" && !rest[0]) throw new Error("usage: servedev profile rename <profile> <new-name>");
       result = await opProfile({
         cwd,
-        action: (action === "up" ? "start" : action) as "create" | "add" | "remove" | "rename" | "delete" | "start",
+        action: (action === "up" ? "start" : action) as "create",
         name,
         servers: rest,
         running: o.running,
         rename: rest[0],
+        shared: o.shared,
+        project: o.project,
+        description: o.description,
       });
       break;
     }
@@ -365,7 +393,21 @@ async function main() {
       result = await opRuns({ cwd, name: args[0], limit: o.limit ? Number(o.limit) : undefined });
       break;
     case "config":
-      result = await opConfig({ key: args[0], value: args[1] });
+      if (args[0] === "status" || args[0] === "check") result = await opConfigStatus();
+      else if (args[0] === "where") {
+        if (!args[1]) throw new Error("usage: servedev config where <server or profile>");
+        result = await opWhere({ cwd, name: args[1] });
+      } else result = await opConfig({ key: args[0], value: args[1] });
+      break;
+    case "grid":
+      if (args[0] === "reset" && args[1]) result = await opResetGrid({ profile: args[1] });
+      else result = await opGetGrid({ profile: args[0] });
+      break;
+    case "setup":
+      result = await opSetup({ apply: o.apply, map: Object.fromEntries((o.map ?? []).map(splitKv)), roots: args });
+      break;
+    case "add":
+      result = await opAddProject({ cwd, path: args[0] });
       break;
     case "restart":
       result = await opRestart({ cwd, name: args[0], wait: !o["no-wait"], timeout, profile: o.profile });

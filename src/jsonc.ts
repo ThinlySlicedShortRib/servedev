@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { applyEdits, modify, parse, printParseErrorCode, type FormattingOptions, type ParseError } from "jsonc-parser";
+import { applyEdits, findNodeAtLocation, modify, parse, parseTree, printParseErrorCode, type Node, type ParseError } from "jsonc-parser";
 
 /**
  * Config files are JSONC (JSON with comments and trailing commas). Edits go through
@@ -41,10 +41,88 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** The indentation a file already uses ("  " when it has none yet). */
-function formatting(text: string): FormattingOptions {
-  const indent = text.match(/^([ \t]+)(?=["}\]])/m)?.[1] ?? "  ";
-  return { insertSpaces: !indent.includes("\t"), tabSize: indent.includes("\t") ? 1 : indent.length, eol: "\n" };
+/** The indentation unit a file already uses ("  " when it has none yet). */
+function indentUnit(text: string): string {
+  const lines = text.split("\n").map((l) => l.match(/^([ \t]+)\S/)?.[1]).filter((x): x is string => !!x);
+  if (!lines.length) return "  ";
+  if (lines.some((l) => l.includes("\t"))) return "\t";
+  return " ".repeat(Math.min(...lines.map((l) => l.length)));
+}
+
+/** Leading whitespace of the line `offset` is on. */
+function lineIndent(text: string, offset: number): string {
+  const start = text.lastIndexOf("\n", offset - 1) + 1;
+  return text.slice(start).match(/^[ \t]*/)![0];
+}
+
+/**
+ * JSON for `value`, formatted with `unit` and indented to continue a line indented by `indent`.
+ * Short lists of plain values stay on one line (["api", "web"]), as people write them.
+ */
+function render(value: unknown, unit: string, indent: string): string {
+  if (Array.isArray(value)) {
+    if (!value.length) return "[]";
+    if (value.every((v) => v === null || typeof v !== "object")) {
+      const inline = `[${value.map((v) => JSON.stringify(v)).join(", ")}]`;
+      if (inline.length <= 80) return inline;
+    }
+    return `[\n${value.map((v) => indent + unit + render(v, unit, indent + unit)).join(",\n")}\n${indent}]`;
+  }
+  if (isPlainObject(value)) {
+    const entries = Object.entries(value).filter(([, v]) => v !== undefined);
+    if (!entries.length) return "{}";
+    return `{\n${entries.map(([k, v]) => `${indent}${unit}${JSON.stringify(k)}: ${render(v, unit, indent + unit)}`).join(",\n")}\n${indent}}`;
+  }
+  return JSON.stringify(value);
+}
+
+type Path = (string | number)[];
+
+/**
+ * Minimal edits: replace a value in place, or insert a property after the last one (after its
+ * trailing comment, if any). Nothing else in the file is reformatted. Removals use jsonc-parser.
+ */
+function setValue(text: string, at: Path, value: unknown, unit: string): string {
+  const tree = parseTree(text, [], { allowTrailingComma: true });
+  if (!tree) return JSON.stringify(value, null, unit) + "\n";
+  const node = findNodeAtLocation(tree, at);
+  if (node) {
+    const indent = lineIndent(text, node.parent?.type === "property" ? node.parent.offset : node.offset);
+    return text.slice(0, node.offset) + render(value, unit, indent) + text.slice(node.offset + node.length);
+  }
+  // A new property: make sure the parent object exists, then append to it.
+  const parentPath = at.slice(0, -1);
+  const key = at[at.length - 1];
+  const parent = parentPath.length ? findNodeAtLocation(tree, parentPath) : tree;
+  if (!parent || parent.type !== "object" || typeof key !== "string") {
+    return applyEdits(text, modify(text, at, value, { formattingOptions: { insertSpaces: unit !== "\t", tabSize: unit === "\t" ? 1 : unit.length } }));
+  }
+  const props = parent.children ?? [];
+  const objIndent = lineIndent(text, parent.parent?.type === "property" ? parent.parent.offset : parent.offset);
+  const propIndent = props.length ? lineIndent(text, props[0].offset) : objIndent + unit;
+  const entry = `${JSON.stringify(key)}: ${render(value, unit, propIndent)}`;
+  if (!props.length) {
+    const open = parent.offset + 1;
+    const close = parent.offset + parent.length - 1;
+    return `${text.slice(0, open)}\n${propIndent}${entry}\n${objIndent}${text.slice(close)}`;
+  }
+  const last: Node = props[props.length - 1];
+  const end = last.offset + last.length;
+  const rest = text.slice(end);
+  const comma = /^\s*,/.test(rest.replace(/^[ \t]*\/\*.*?\*\//, "")) ? "" : ",";
+  // Insert after the rest of the last property's line (keeps a trailing "// comment" with it),
+  // unless the object closes on that same line.
+  const lineEnd = text.indexOf("\n", end);
+  const sameLineClose = text.slice(end, lineEnd < 0 ? undefined : lineEnd).includes("}");
+  if (sameLineClose || lineEnd < 0) return `${text.slice(0, end)}${comma} ${entry}${rest}`;
+  const trailing = text.slice(end, lineEnd);
+  const trailingComma = /,/.test(trailing.replace(/\/\/.*$|\/\*.*?\*\//g, ""));
+  const head = trailingComma ? text.slice(0, lineEnd) : text.slice(0, end) + comma + trailing;
+  return `${head}\n${propIndent}${entry}${text.slice(lineEnd)}`;
+}
+
+function removeValue(text: string, at: Path): string {
+  return applyEdits(text, modify(text, at, undefined, {}));
 }
 
 /**
@@ -52,19 +130,17 @@ function formatting(text: string): FormattingOptions {
  * compared key by key, anything else (arrays included) is replaced where it differs.
  */
 export function applyChanges(text: string, before: unknown, after: unknown): string {
-  const options = formatting(text);
-  if (!text.trim() || !isPlainObject(before)) {
-    return JSON.stringify(after, null, options.insertSpaces ? " ".repeat(options.tabSize ?? 2) : "\t") + "\n";
-  }
+  const unit = indentUnit(text);
+  if (!text.trim() || !isPlainObject(before)) return render(after, unit, "") + "\n";
   let out = text;
-  const walk = (at: (string | number)[], b: unknown, a: unknown) => {
+  const walk = (at: Path, b: unknown, a: unknown) => {
     if (deepEqual(b, a)) return;
     if (isPlainObject(b) && isPlainObject(a)) {
-      for (const key of Object.keys(b)) if (!(key in a) || a[key] === undefined) out = applyEdits(out, modify(out, [...at, key], undefined, { formattingOptions: options }));
+      for (const key of Object.keys(b)) if (!(key in a) || a[key] === undefined) out = removeValue(out, [...at, key]);
       for (const [key, value] of Object.entries(a)) if (value !== undefined) walk([...at, key], b[key], value);
       return;
     }
-    out = applyEdits(out, modify(out, at, a, { formattingOptions: options }));
+    out = setValue(out, at, a, unit);
   };
   walk([], before, after);
   return out.endsWith("\n") ? out : out + "\n";

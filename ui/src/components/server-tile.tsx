@@ -27,7 +27,7 @@ function lineClass(line: string) {
   return undefined
 }
 
-async function act(action: "start" | "restart" | "stop", s: Server, startProfile?: number) {
+async function act(action: "start" | "restart" | "stop", s: Server, startProfile?: string) {
   try {
     if (action === "start") await api("/api/start", { id: s.id, clientCwd: s.cwd, wait: false, profile: startProfile })
     else if (action === "restart") await api("/api/restart", { id: s.id, wait: false })
