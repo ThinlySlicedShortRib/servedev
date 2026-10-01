@@ -475,12 +475,13 @@
     background: var(--warning);
     animation: studio-ping 1.8s var(--studio-ease) infinite;
 }
-.studio-dot[data-status="crashed"]::after {
+.studio-dot[data-status="crashed"][data-fx="crash"]::after {
     background: var(--destructive);
     animation: studio-ping 1.1s var(--studio-ease) 2;
 }
-/* The one "attention" moment: a crashed row or tile flashes red once when the state appears. */
-[data-style="studio"] .studio-crash-flash { animation: studio-crash-flash 1.6s var(--studio-ease) 1; }
+/* The one "attention" moment: a crashed row or tile flashes red once when it crashes (its dot
+   carries data-fx="crash" only for a crash seen live, not on load or when switching styles). */
+[data-style="studio"] .studio-crash-flash:has(.studio-dot[data-fx="crash"]) { animation: studio-crash-flash 1.6s var(--studio-ease) 1; }
 .studio-live { animation: studio-breathe 2.8s ease-in-out infinite; }
 .studio-skeleton {
     background: linear-gradient(90deg, var(--muted) 0%, color-mix(in oklch, var(--muted), var(--foreground) 6%) 50%, var(--muted) 100%);

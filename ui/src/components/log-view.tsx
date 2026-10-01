@@ -105,13 +105,40 @@ export function LogView({
     scrollToLine(viewport(), search.currentLine)
   }, [search.currentLine, search.position])
 
-  // Scrolling up pauses follow; scrolling back to the bottom resumes it.
+  // Scrolling up pauses follow; scrolling back to the bottom resumes it. Only the user's own
+  // scrolling pauses it: layout changes (switching styles changes fonts and line heights) also
+  // move the scroll position, and that shouldn't stop following.
+  const keepPinned = React.useRef(true)
+  React.useLayoutEffect(() => {
+    keepPinned.current = follow && !query
+  }, [follow, query])
   React.useEffect(() => {
     const v = viewport()
-    if (!v) return
-    const onScroll = () => setFollow(v.scrollHeight - v.scrollTop - v.clientHeight < 30)
+    const root = rootRef.current
+    if (!v || !root) return
+    let userUntil = 0
+    const byUser = () => {
+      userUntil = Date.now() + 600
+    }
+    const onScroll = () => {
+      if (v.scrollHeight - v.scrollTop - v.clientHeight < 30) setFollow(true)
+      else if (Date.now() < userUntil) setFollow(false)
+      else if (keepPinned.current) v.scrollTop = v.scrollHeight
+    }
+    // While following, stay at the bottom when the log's size changes without new lines.
+    const resized = new ResizeObserver(() => {
+      if (keepPinned.current) v.scrollTop = v.scrollHeight
+    })
+    resized.observe(v)
+    if (preRef.current) resized.observe(preRef.current)
+    const input = ["wheel", "touchmove", "keydown", "pointerdown"] as const
+    for (const e of input) root.addEventListener(e, byUser, { passive: true })
     v.addEventListener("scroll", onScroll, { passive: true })
-    return () => v.removeEventListener("scroll", onScroll)
+    return () => {
+      resized.disconnect()
+      for (const e of input) root.removeEventListener(e, byUser)
+      v.removeEventListener("scroll", onScroll)
+    }
   }, [])
 
   const empty =

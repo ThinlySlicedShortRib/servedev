@@ -92,12 +92,16 @@ export function statusTagClass(status: Status | "idle" | undefined) {
 /**
  * Studio style: healthy is quiet, only a crash is loud. Colors crossfade between states;
  * a soft ring grows out while starting, and twice when it crashes (.studio-dot in studio.css).
+ * The crash moment is marked with data-fx="crash" only when the status changes while shown, so
+ * loading the page or switching into Studio doesn't replay it for servers that crashed earlier.
  */
 function StudioStatusDot({ status, className }: { status: Status | "idle"; className?: string }) {
+  const fx = useStatusFx(status)
   return (
     <span
       aria-hidden
       data-status={status}
+      data-fx={fx ?? undefined}
       className={cn(
         "studio-dot inline-block size-2 shrink-0 rounded-full",
         status === "running" && "bg-success",
