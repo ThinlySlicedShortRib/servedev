@@ -59,16 +59,25 @@ function BootScreen() {
       return false
     }
   })
+  // The CSS fade hides it, but some browsers don't finish animations reliably (or pause them),
+  // so it also unmounts when the fade ends, with a timer as a backstop: it must never stay over the UI.
+  const [done, setDone] = React.useState(false)
   React.useEffect(() => {
     try {
       sessionStorage.setItem(BOOT_KEY, "1")
     } catch {
       // storage unavailable
     }
+    const t = setTimeout(() => setDone(true), 1000)
+    return () => clearTimeout(t)
   }, [])
-  if (!show) return null
+  if (!show || done) return null
   return (
-    <div aria-hidden className="boot-screen font-mono">
+    <div
+      aria-hidden
+      className="boot-screen font-mono"
+      onAnimationEnd={(e) => e.animationName === "term-boot-out" && setDone(true)}
+    >
       {BOOT_LINES.map((line, i) => (
         <div key={i} style={{ animationDelay: `${i * 110}ms` }} className={i === 0 ? "phosphor-glow font-bold" : undefined}>
           {line.startsWith("[  OK  ]") ? (
