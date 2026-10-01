@@ -267,3 +267,19 @@ test("jsonc: adding a property doesn't reformat its neighbours; short lists stay
   expect(out).toContain('"servers": ["web", "extra"]');
   expect(parseJsonc(out).data).toEqual(after);
 });
+
+test("migration: credentials on a command line don't move into config.json", () => {
+  const root = repo({});
+  const st = new Store(path.join(tmp("sd-db-"), "servedev.db"));
+  const now = Date.now();
+  st.db
+    .query(
+      `INSERT INTO servers (id, name, project, root, command, setup, cwd, env, port_spec, ready, pinned, hostname, restarts, created_at, updated_at)
+       VALUES ('app:proxy', 'proxy', 'app', $root, $command, NULL, $root, '{}', NULL, '{}', 0, NULL, 0, $now, $now)`,
+    )
+    .run({ $root: root, $command: "cloud-sql-proxy --token=ya29.FAKEFAKEFAKEFAKEFAKE proj:region:db --port=5433", $now: now });
+  const { config, report } = buildMigration(st.db as Database, {}, () => ({}));
+  expect(config.servers?.app?.proxy?.command).toBe("cloud-sql-proxy proj:region:db --port=5433");
+  expect(report.notes.join("\n")).toContain("--token");
+  st.close();
+});

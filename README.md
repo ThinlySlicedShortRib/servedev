@@ -73,7 +73,8 @@ The proxy listens on port 80 for port-less URLs. macOS lets normal users bind po
 ```sh
 servedev pin web                         # stays at the top of the dashboard and starts when you log in
 servedev autostart off                   # remove the login item (macOS LaunchAgent)
-servedev profile create "Full stack" api web   # a named set of servers, from any projects
+servedev profile create "Full stack" api web   # a named set of servers, from any projects (yours only)
+servedev profile create "Full stack" api web --shared   # ...or in the repo's servedev.json, for everyone
 servedev profile create Review --running       # ...or from whatever is running now
 servedev profile start "Full stack"      # start them in order; nothing else is stopped
 servedev profile ls
@@ -118,12 +119,12 @@ See [docs/providers.md](docs/providers.md) for the format.
 }
 ```
 
-`servedev up` starts all of them in dependency order.
+`servedev up` starts all of them in dependency order. A `profiles` section adds shared profiles: everyone who clones the repo gets them, tagged **Shared** in the dashboard and kept in sync as the file changes. Your own profiles, account picks and grid tweaks live in `~/.servedev/config.json`. See [docs/config.md](docs/config.md) for both files, worktrees, and moving to a new machine (`servedev setup`).
 
 
 ### Sharing a server through git
 
-A server started from the dashboard or with `servedev start -- <cmd>` lives only in servedev's database on this machine. To share it, write it into its repo's servedev.json:
+A server started from the dashboard or with `servedev start -- <cmd>` lives only in your `~/.servedev/config.json`. To share it, write it into its repo's servedev.json:
 
 ```sh
 servedev save api --dry-run   # show what would be written
@@ -173,7 +174,7 @@ MCP tools cover everything the dashboard can do, so you can ask an agent to "mak
 
 Some tools start work in process groups of their own: turbo, for one, runs every task in a new group. servedev follows the server's process tree and adopts any group a descendant creates, so it finds ports opened there, and stop/restart signal every group (otherwise `next dev` under turbo would be left running on its port). The groups are saved with each run; `servedev status` and the dashboard's **Processes** tab show them.
 
-State lives in SQLite (`~/.servedev/servedev.db`): server definitions (with only their own variables, never a copy of the whole environment), one row per **run** (every start/restart), write-time marks so `--since` survives daemon restarts, and settings. Log text stays in files, one per run: `~/.servedev/logs/<project>_<name>/<run-id>.log`. Logs of runs that stopped more than `log_retention_days` (default 7) ago are deleted hourly; a stopped server keeps its row, so you still see how it last ended. Older installs' `state.json` is imported on first start and kept as `state.json.migrated`.
+Configuration lives in JSON: each repo's `servedev.json` (shared) and `~/.servedev/config.json` (yours); see [docs/config.md](docs/config.md). State lives in SQLite (`~/.servedev/servedev.db`): one row per **run** (every start/restart), what it started with, and write-time marks so `--since` survives daemon restarts. Log text stays in files, one per run: `~/.servedev/logs/<project>_<name>/<run-id>.log`. Logs of runs that stopped more than `log_retention_days` (default 7) ago are deleted hourly; a stopped server keeps its row, so you still see how it last ended. Older installs' `state.json` is imported on first start and kept as `state.json.migrated`.
 
 The API requires a token (`~/.servedev/token`) and rejects foreign `Host`/`Origin` headers, so web pages can't use it to run commands.
 

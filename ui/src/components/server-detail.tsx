@@ -38,7 +38,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ACTIVE, ago, api, openUrl, statusLabel } from "@/lib/api"
+import { ACTIVE, ago, api, openUrl, statusLabel, type Server } from "@/lib/api"
 import type { Entry } from "@/lib/entries"
 
 type Action = "start" | "restart" | "stop" | "remove"
@@ -81,7 +81,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
       } else if (action === "stop") {
         await api("/api/stop", { id: s!.id })
       } else {
-        await api("/api/remove", { id: s!.id })
+        await api("/api/remove", { id: s!.id, fromRepo: !!s!.source?.repo })
         toast.success(`Removed ${entry.name} from servedev`)
       }
     } catch (e) {
@@ -222,8 +222,10 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
                     <AlertDialogDescription>
                       {active ? "It's stopped first. " : ""}Its logs and run
                       history are deleted, and it's taken off any profiles and
-                      grids. The project folder and its files aren't touched, so
-                      you can start it again later.
+                      grids.{" "}
+                      {s?.source?.repo
+                        ? "It's defined in the repo's servedev.json, so it's also taken out of that file and its shared profiles. Commit that change to remove it for everyone, or discard it to undo. To stop starting it only for yourself, skip it in a profile instead."
+                        : "The project folder and its files aren't touched, so you can start it again later."}
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -232,7 +234,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
                       variant="destructive"
                       onClick={() => run("remove")}
                     >
-                      Remove
+                      {s?.source?.repo ? "Remove from servedev.json" : "Remove"}
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
@@ -291,11 +293,11 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           )}
           {s && (
             <>
-              <dt className="text-muted-foreground">servedev.json</dt>
+              <dt className="text-muted-foreground">Defined in</dt>
               <dd className="flex flex-wrap items-center gap-2">
-                <span className="text-sm">
-                  {s.config === "defined" ? "Defined in servedev.json" : s.config === "differs" ? "Differs from servedev.json" : "Not in servedev.json"}
-                </span>
+                <Hint label={definedHint(s)}>
+                  <span className="text-sm">{definedLabel(s)}</span>
+                </Hint>
                 {s.config !== "defined" && (
                   <Hint
                     label={
@@ -476,4 +478,18 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
       </Tabs>
     </div>
   )
+}
+
+/** Where a server's definition comes from: the repo (shared), your config.json, or both. */
+function definedLabel(s: Server): string {
+  if (s.source?.repo && s.source.local) return "servedev.json, with your changes"
+  if (s.source?.repo) return s.config === "differs" ? "servedev.json (running differently)" : "servedev.json (shared)"
+  return "Your config only"
+}
+
+function definedHint(s: Server): string {
+  if (s.source?.repo && s.source.local)
+    return "The repo's servedev.json defines it for everyone; ~/.servedev/config.json changes some of it just for you."
+  if (s.source?.repo) return "The repo's servedev.json defines it, so everyone who clones the repo gets it."
+  return "Only in ~/.servedev/config.json. Save it to servedev.json to share it through git."
 }

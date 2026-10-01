@@ -1,10 +1,10 @@
 import * as React from "react"
-import { FolderOpenIcon, PlayIcon } from "lucide-react"
+import { FolderOpenIcon, FolderPlusIcon, PlayIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Hint, TruncatedText } from "@/components/hint"
 import { StatusDot } from "@/components/status-dot"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -37,6 +37,23 @@ export function NewServerDialog({
   const [info, setInfo] = React.useState<Inspection | null>(null)
   const [inspecting, setInspecting] = React.useState(false)
   const [picking, setPicking] = React.useState(false)
+  const [adding, setAdding] = React.useState(false)
+
+  async function addProject() {
+    if (!info?.root) return
+    setAdding(true)
+    try {
+      const r = await api<{ project: string; servers: string[]; profiles: string[] }>("/api/projects/add", { root: info.root })
+      toast.success(`Added ${r.project}`, {
+        description: `${plural(r.servers.length, "server")} and ${plural(r.profiles.length, "shared profile")} from servedev.json.`,
+      })
+      onOpenChange(false)
+    } catch (e) {
+      toast.error("Couldn't add the project", { description: (e as Error).message })
+    } finally {
+      setAdding(false)
+    }
+  }
   const [name, setName] = React.useState("")
   const [command, setCommand] = React.useState("")
   const [port, setPort] = React.useState("")
@@ -192,6 +209,21 @@ export function NewServerDialog({
               )}
             </Field>
 
+            {ready && !info.tracked && ((info.configured?.length ?? 0) > 0 || (info.profiles?.length ?? 0) > 0) && (
+              <Alert>
+                <AlertTitle>This repo has a servedev.json</AlertTitle>
+                <AlertDescription className="flex flex-col items-start gap-2">
+                  {describeRepo(info)} Add the project to see them without starting anything.
+                  <Hint label="Track this project: its servedev.json servers and shared profiles appear in the sidebar and profile switcher">
+                    <Button type="button" size="sm" variant="outline" disabled={adding} onClick={addProject}>
+                      {adding ? <Spinner data-icon="inline-start" /> : <FolderPlusIcon data-icon="inline-start" />}
+                      Add project
+                    </Button>
+                  </Hint>
+                </AlertDescription>
+              </Alert>
+            )}
+
             {ready && info.configured && info.configured.length > 0 && (
               <FieldSet>
                 <FieldLegend variant="label">Defined in servedev.json</FieldLegend>
@@ -342,4 +374,13 @@ export function NewServerDialog({
 
 function tildify(p: string) {
   return p.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~")
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
+
+function describeRepo(info: Inspection): string {
+  const servers = info.configured?.length ?? 0
+  const profiles = info.profiles ?? []
+  const parts = [servers ? plural(servers, "server") : "", profiles.length ? `${plural(profiles.length, "shared profile")} (${profiles.join(", ")})` : ""]
+  return `It defines ${parts.filter(Boolean).join(" and ")}.`
 }

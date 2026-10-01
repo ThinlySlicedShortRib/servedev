@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Selections } from "./accounts/registry";
 import { LOCAL_SCHEMA, LOCAL_VERSION, type LocalConfig, type LocalProfileConfig } from "./config";
 import { gitBranch, gitInfo } from "./git";
+import { stripSecrets } from "./sanitize";
 import type { GridTile, ProjectConfig, ReadySpec, ServerConfig } from "./project";
 
 /**
@@ -78,16 +79,22 @@ export function buildMigration(db: Database, existing: LocalConfig, readRepo: (r
     const ready = readyEntry(JSON.parse(r.ready || "{}"));
     const port = r.port_spec == null ? undefined : JSON.parse(r.port_spec);
     const repo = readRepo(r.root).servers?.[r.name];
+    // config.json is meant to be synced (dotfiles), so credentials on a command line don't move into it.
+    const clean = (cmd: string, what: string) => {
+      const out = stripSecrets(cmd);
+      if (out.removed.length) report.notes.push(`${id}: removed ${out.removed.join(", ")} from its ${what}; it gets credentials from accounts/ADC or .env instead`);
+      return out.command;
+    };
     const entry: Partial<ServerConfig> = {};
     if (repo) {
       // Only what the database added to servedev.json's definition.
-      if (r.setup && repo.setup === undefined) entry.setup = r.setup;
+      if (r.setup && repo.setup === undefined) entry.setup = clean(r.setup, "setup");
       if (r.hostname && repo.hostname === undefined) entry.hostname = r.hostname;
       if (port !== undefined && repo.port === undefined) entry.port = port;
       if (ready && repo.ready === undefined) entry.ready = ready;
     } else {
-      entry.command = r.command;
-      if (r.setup) entry.setup = r.setup;
+      entry.command = clean(r.command, "command");
+      if (r.setup) entry.setup = clean(r.setup, "setup");
       const rel = path.relative(r.root, r.cwd);
       if (rel && rel !== ".") entry.cwd = rel;
       if (port !== undefined) entry.port = port;

@@ -301,6 +301,10 @@ export interface Inspection {
   existing?: { name: string; status: Status }[]
   suggestedName?: string
   configError?: string
+  /** servedev already tracks this project (its servedev.json servers and profiles show up). */
+  tracked?: boolean
+  /** Shared profiles in the repo's servedev.json. */
+  profiles?: string[]
 }
 
 /** A tile in the dashboard grid (server id, grid position and size, and what it shows). */

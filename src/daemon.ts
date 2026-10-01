@@ -265,7 +265,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     syncProxy();
   }
   config.on("change", () => reconcile());
-  config.on("status", () => profilesChanged());
+  // git status of servedev.json is part of each shared profile ("uncommitted changes"), so rebuild them.
+  config.on("status", () => reconcile());
   config.watch();
 
   function configSummary() {
