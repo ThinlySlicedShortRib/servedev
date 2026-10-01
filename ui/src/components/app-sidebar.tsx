@@ -1,7 +1,9 @@
 import * as React from "react"
-import { CheckIcon, ExternalLinkIcon, PinIcon, PlusIcon, SearchIcon, Trash2Icon } from "lucide-react"
+import { CheckIcon, ExternalLinkIcon, PinIcon, PlusIcon, SearchIcon, Trash2Icon } from "@/components/icons"
 
 import { StatusDot } from "@/components/status-dot"
+import { useStyleId } from "@/components/style-provider"
+import { LogoMark } from "@/components/terminal-decor"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
@@ -82,6 +84,7 @@ export function AppSidebar({
   const [query, setQuery] = React.useState("")
   const [status, setStatus] = React.useState<StatusFilter>(loadFilter)
   const searchRef = React.useRef<HTMLInputElement>(null)
+  const terminal = useStyleId() === "terminal"
 
   const all = React.useMemo(() => [...pinned, ...groups.flatMap(([, es]) => es)], [groups, pinned])
   const counts = React.useMemo(() => {
@@ -128,10 +131,29 @@ export function AppSidebar({
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 pl-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0">
-          <span className="font-semibold group-data-[collapsible=icon]:hidden">servedev</span>
-          <span className="text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-            {connected === null ? "Connecting…" : connected ? "Live" : "Disconnected"}
-          </span>
+          {terminal ? (
+            <>
+              <span className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
+                <LogoMark className="size-5" />
+                <span className="phosphor-glow font-bold tracking-tight">
+                  servedev<span aria-hidden className="text-primary select-none">_</span>
+                </span>
+              </span>
+              <span
+                className={`flex items-center gap-1.5 text-[11px] font-semibold tracking-wider uppercase group-data-[collapsible=icon]:hidden ${connected ? "text-success" : connected === false ? "text-destructive" : "text-warning"}`}
+              >
+                <StatusDot status={connected === null ? "starting" : connected ? "running" : "crashed"} />
+                {connected === null ? "Connecting…" : connected ? "Live" : "Disconnected"}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold group-data-[collapsible=icon]:hidden">servedev</span>
+              <span className="text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+                {connected === null ? "Connecting…" : connected ? "Live" : "Disconnected"}
+              </span>
+            </>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={<Button variant="ghost" size="icon-sm" className="ml-auto group-data-[collapsible=icon]:ml-0" onClick={onNew} aria-label="New server" />}
@@ -171,7 +193,7 @@ export function AppSidebar({
               }
             }}
             placeholder="Search name, port, project…"
-            className="pr-8 pl-8"
+            className="pr-8 pl-8 terminal:pr-7 terminal:placeholder:text-xs"
           />
           {!query && <Kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>}
         </div>
@@ -181,11 +203,11 @@ export function AppSidebar({
           value={[status]}
           onValueChange={(v) => v[0] && changeStatus(v[0] as StatusFilter)}
           aria-label="Filter by status"
-          className="w-full group-data-[collapsible=icon]:hidden"
+          className="w-full group-data-[collapsible=icon]:hidden terminal:gap-1"
         >
           {FILTERS.map((f) => (
             <Hint key={f.value} label={`${f.hint} (${counts[f.value]})`}>
-              <ToggleGroupItem value={f.value} className="flex-1 px-1.5 text-xs">
+              <ToggleGroupItem value={f.value} className="flex-1 px-1.5 text-xs terminal:flex-auto terminal:gap-1 terminal:px-1.5 terminal:text-[11px]">
                 {f.label}
                 {f.value === "crashed" && counts.crashed > 0 && <span className="text-destructive tabular-nums">{counts.crashed}</span>}
               </ToggleGroupItem>
@@ -256,7 +278,7 @@ export function AppSidebar({
                   const sub = project === PINNED ? `${e.project}, ${state}` : state
                   const port = s && portOf(s)
                   return (
-                    <SidebarMenuItem key={e.key}>
+                    <SidebarMenuItem key={e.key} className="tree-row terminal:pl-5 terminal:group-data-[collapsible=icon]:pl-0">
                       <SidebarMenuButton
                         draggable={!!grid && !!s && !grid.ids.has(s.id)}
                         onDragStart={(ev) => {
@@ -279,7 +301,7 @@ export function AppSidebar({
                         <span className="flex size-4 shrink-0 items-center justify-center group-data-[collapsible=icon]:size-8">
                           {x ? (
                             // Hollow: running, but not managed by servedev.
-                            <span aria-hidden className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-emerald-500" />
+                            <span aria-hidden className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-emerald-500 terminal:rounded-[1px] terminal:border-success" />
                           ) : (
                             <StatusDot status={e.status} />
                           )}
@@ -317,7 +339,7 @@ export function AppSidebar({
                             aria-label={grid.ids.has(s.id) ? `Remove ${e.name} from the grid` : `Add ${e.name} to the grid`}
                             className="top-3"
                           >
-                            {grid.ids.has(s.id) ? <CheckIcon className="text-emerald-600 dark:text-emerald-400" /> : <PlusIcon />}
+                            {grid.ids.has(s.id) ? <CheckIcon className="text-emerald-600 dark:text-emerald-400 terminal:text-success terminal:dark:text-success" /> : <PlusIcon />}
                           </SidebarMenuAction>
                         </Hint>
                       ) : x?.url ? (

@@ -1,9 +1,10 @@
 import * as React from "react"
-import { LayoutGridIcon } from "lucide-react"
+import { LayoutGridIcon } from "@/components/icons"
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
 
 import { DRAG_HANDLE, NO_DRAG, ServerTile } from "@/components/server-tile"
+import { useStyleId } from "@/components/style-provider"
 import { useMultiLogStream } from "@/hooks/use-multi-log"
 import { TILE } from "@/hooks/use-custom-grid"
 import { SERVER_MIME } from "@/lib/drag"
@@ -46,6 +47,7 @@ export function GridView({
   onOpenDetails: (id: string) => void
 }) {
   const { width, containerRef, mounted } = useContainerWidth()
+  const terminal = useStyleId() === "terminal"
   const shown = React.useMemo(() => items.filter((it) => servers.has(it.i)), [items, servers])
   // Stable across renders (logs stream in constantly); the grid compares it to its own state.
   const layout = React.useMemo(() => shown.map((it) => ({ ...it, minW: TILE.minW, minH: TILE.minH })), [shown])
@@ -70,9 +72,18 @@ export function GridView({
   }
 
   const empty = shown.length === 0 && (
-    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
-      <LayoutGridIcon className="size-6 text-muted-foreground" />
-      <p className="text-sm font-medium">Build your grid</p>
+    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center terminal:inset-3 terminal:border terminal:border-dashed terminal:border-input">
+      {terminal && (
+        // Decorative: an empty 2x2 tmux layout.
+        <pre aria-hidden className="mb-2 text-[10px] leading-[1.15] text-muted-foreground select-none">
+          {"┌────────┬────────┐\n│        │        │\n│ $ _    │        │\n├────────┼────────┤\n│        │        │\n│        │        │\n└────────┴────────┘"}
+        </pre>
+      )}
+      <LayoutGridIcon className="size-6 text-muted-foreground terminal:size-4 terminal:text-primary" />
+      <p className="phosphor-glow text-sm font-medium terminal:font-semibold">
+        Build your grid
+        {terminal && <span aria-hidden className="term-cursor ml-1" />}
+      </p>
       <p className="max-w-sm text-sm text-muted-foreground">
         Drag servers here from the list on the left, or click the + next to one. Drag tiles by their header and resize them from the corner.
       </p>

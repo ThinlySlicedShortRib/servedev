@@ -1,5 +1,5 @@
 import * as React from "react"
-import { PlayIcon, SquareIcon } from "lucide-react"
+import { PlayIcon, SquareIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Hint, TruncatedText } from "@/components/hint"

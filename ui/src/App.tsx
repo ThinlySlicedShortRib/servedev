@@ -1,10 +1,11 @@
 import * as React from "react"
-import { FolderOpenIcon, LayoutGridIcon, MoreHorizontalIcon, RotateCcwIcon, SaveIcon, ServerIcon, SquareIcon, TriangleAlertIcon, UploadIcon } from "lucide-react"
+import { FolderOpenIcon, LayoutGridIcon, MoreHorizontalIcon, RotateCcwIcon, SaveIcon, ServerIcon, SquareIcon, TriangleAlertIcon, UploadIcon } from "@/components/icons"
 
 import { AccountsSheet } from "@/components/accounts-sheet"
 import { AppearanceMenu } from "@/components/appearance-menu"
 import { AppSidebar } from "@/components/app-sidebar"
 import { ConfigIssues } from "@/components/config-issues"
+import { CrtPower } from "@/components/terminal-decor"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Hint, TruncatedText } from "@/components/hint"
 import { BulkActions } from "@/components/bulk-actions"
@@ -241,7 +242,7 @@ export function App() {
         onNew={() => setCreating(true)}
       />
       <SidebarInset className="h-svh min-w-0 overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 terminal:bg-sidebar">
           <Hint label="Shrink or expand the sidebar (⌘B)">
             <SidebarTrigger className="-ml-1" />
           </Hint>
@@ -314,6 +315,8 @@ export function App() {
           </div>
         </header>
 
+        {/* Terminal style: a CRT flicker each time the daemon connection comes up. */}
+        {connected && <CrtPower />}
         {connected && config && <ConfigIssues config={config} />}
 
         {connected === false && (

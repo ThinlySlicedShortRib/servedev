@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CircleAlertIcon } from "lucide-react"
+import { CircleAlertIcon } from "@/components/icons"
 
 import { AccountPicker } from "@/components/account-picker"
 import { Alert, AlertDescription } from "@/components/ui/alert"

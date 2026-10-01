@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client"
 import "./index.css"
 import App from "./App.tsx"
 import { StyleProvider } from "@/components/style-provider"
+import { TerminalDecor } from "@/components/terminal-decor"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -15,6 +16,7 @@ createRoot(document.getElementById("root")!).render(
         <TooltipProvider>
           <App />
           <Toaster />
+          <TerminalDecor />
         </TooltipProvider>
       </StyleProvider>
     </ThemeProvider>

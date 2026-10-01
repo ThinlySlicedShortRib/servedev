@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CircleAlertIcon, CircleCheckIcon, CircleXIcon, FlaskConicalIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { CircleAlertIcon, CircleCheckIcon, CircleXIcon, FlaskConicalIcon, PlusIcon, Trash2Icon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Hint } from "@/components/hint"
@@ -437,7 +437,7 @@ function FieldEditor({
 }
 
 function TestResults({ result: r, stale }: { result: SpecTest; stale: boolean }) {
-  const ok = <CircleCheckIcon className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+  const ok = <CircleCheckIcon className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400 terminal:text-success terminal:dark:text-success" />
   const bad = <CircleXIcon className="size-4 shrink-0 text-destructive" />
   return (
     <section className="flex flex-col gap-3 rounded-lg border p-3 text-sm" aria-label="Test results">

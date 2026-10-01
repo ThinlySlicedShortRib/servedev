@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ExternalLinkIcon, HandIcon, SquareIcon, TriangleAlertIcon } from "lucide-react"
+import { ExternalLinkIcon, HandIcon, SquareIcon, TriangleAlertIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -62,7 +62,10 @@ export function ExternalDetail({
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-xl font-semibold">{x.suggestedName}</h1>
+          <h1 className="text-xl font-semibold terminal:flex terminal:items-baseline terminal:gap-2 terminal:text-lg">
+            <span aria-hidden className="hidden text-muted-foreground select-none terminal:inline">❯</span>
+            {x.suggestedName}
+          </h1>
           <Badge variant="outline">running outside servedev</Badge>
           {x.orphaned && <Badge variant="destructive">folder deleted</Badge>}
         </div>

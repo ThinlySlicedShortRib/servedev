@@ -11,12 +11,13 @@ import { Switch } from "@/components/ui/switch"
 import { cleanLog, useLogStream } from "@/hooks/use-log-stream"
 import { ago, api, type RunEntry } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useStyleId } from "@/components/style-provider"
 
 const MAX_LINES = 5000
 
 function lineClass(line: string) {
   if (/\b(error|failed|exception|fatal|panic)\b/i.test(line)) return "text-destructive"
-  if (/\bwarn(ing)?\b/i.test(line)) return "text-amber-600 dark:text-amber-400"
+  if (/\bwarn(ing)?\b/i.test(line)) return "text-amber-600 dark:text-amber-400 terminal:text-warning terminal:dark:text-warning"
   return undefined
 }
 
@@ -75,6 +76,7 @@ export function LogView({
     }
   }, [serverId, choice, viewingPast])
   const [query, setQuery] = React.useState("")
+  const terminal = useStyleId() === "terminal"
   const [follow, setFollow] = React.useState(true)
   const rootRef = React.useRef<HTMLDivElement>(null)
   const preRef = React.useRef<HTMLPreElement>(null)
@@ -167,20 +169,24 @@ export function LogView({
           {query ? `${search.matches.length} matching ${search.matches.length === 1 ? "line" : "lines"} of ${total}` : `${total} ${total === 1 ? "line" : "lines"}`}
         </span>
       </div>
-      <ScrollArea ref={rootRef} className="min-h-0 flex-1 bg-muted/40">
-        <pre ref={preRef} className="relative px-4 py-3 pr-9 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap md:px-6 md:pr-9">
+      <ScrollArea ref={rootRef} className="min-h-0 flex-1 bg-muted/40 terminal:border-t terminal:bg-terminal">
+        <pre ref={preRef} className="log-lines relative px-4 py-3 pr-9 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap md:px-6 md:pr-9">
           <LineCopy container={preRef} lines={lines} className="md:right-2" />
           {lines.length
             ? lines.map((l, i) => (
                 <div
                   key={i}
                   data-line={i}
-                  className={cn(lineClass(l), i === search.currentLine && "-mx-2 rounded-sm bg-orange-400/10 px-2")}
+                  className={cn(lineClass(l), i === search.currentLine && "-mx-2 rounded-sm bg-orange-400/10 px-2 terminal:rounded-none terminal:bg-match/40 terminal:shadow-[inset_2px_0_0_var(--warning)]")}
                 >
                   {search.matchSet.has(i) ? <HighlightedLine text={l} re={search.re} current={i === search.currentLine} /> : l || " "}
                 </div>
               ))
             : <span className="text-muted-foreground">{empty}</span>}
+          {/* Terminal style: a cursor under live output. */}
+          {terminal && !viewingPast && lines.length > 0 && (status === "running" || status === "starting") && (
+            <span aria-hidden className="term-cursor select-none" />
+          )}
         </pre>
       </ScrollArea>
     </div>

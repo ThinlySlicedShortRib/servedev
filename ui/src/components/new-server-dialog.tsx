@@ -1,5 +1,5 @@
 import * as React from "react"
-import { FolderOpenIcon, FolderPlusIcon, PlayIcon } from "lucide-react"
+import { FolderOpenIcon, FolderPlusIcon, PlayIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Hint, TruncatedText } from "@/components/hint"

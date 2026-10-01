@@ -11,10 +11,12 @@ import {
   SquareIcon,
   Trash2Icon,
   TriangleAlertIcon,
-} from "lucide-react"
+} from "@/components/icons"
 import { toast } from "sonner"
 
 import { AccountTag } from "@/components/account-tag"
+import { StatusDot, statusTagClass } from "@/components/status-dot"
+import { useStyleId } from "@/components/style-provider"
 import { useStartProfile } from "@/hooks/use-accounts"
 import { BranchTag } from "@/components/branch-tag"
 import { Hint } from "@/components/hint"
@@ -52,6 +54,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
   const active = !!s && ACTIVE.includes(s.status)
   const [busy, setBusy] = React.useState<Action | null>(null)
   const startProfile = useStartProfile(s?.id)
+  const terminal = useStyleId() === "terminal"
   const [tab, setTab] = React.useState<"logs" | "processes" | "preview">("logs")
   const [editingHost, setEditingHost] = React.useState(false)
   const [savingConfig, setSavingConfig] = React.useState(false)
@@ -131,8 +134,12 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
       <div className="flex flex-col gap-4 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold">{entry.name}</h1>
-            <Badge variant={statusVariant}>
+            <h1 className="text-xl font-semibold terminal:flex terminal:items-baseline terminal:gap-2 terminal:text-lg">
+              <span aria-hidden className="hidden text-primary select-none terminal:inline">❯</span>
+              {entry.name}
+            </h1>
+            <Badge variant={statusVariant} className={statusTagClass(s?.status)}>
+              {terminal && s && (s.status === "starting" || s.status === "stopping") && <StatusDot status={s.status} />}
               {s ? statusLabel(s) : "not started"}
             </Badge>
           </div>

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ExternalLinkIcon, RotateCwIcon } from "lucide-react"
+import { ExternalLinkIcon, RotateCwIcon } from "@/components/icons"
 
 import { Hint, TruncatedText } from "@/components/hint"
 import { Button } from "@/components/ui/button"

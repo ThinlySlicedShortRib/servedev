@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CopyIcon } from "lucide-react"
+import { CopyIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Hint } from "@/components/hint"

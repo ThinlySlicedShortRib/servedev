@@ -1,4 +1,4 @@
-import { GitBranchIcon } from "lucide-react"
+import { GitBranchIcon } from "@/components/icons"
 
 import { TruncatedText } from "@/components/hint"
 import { cn } from "@/lib/utils"

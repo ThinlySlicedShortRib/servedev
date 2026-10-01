@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ExternalLinkIcon, PencilIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { ExternalLinkIcon, PencilIcon, PlusIcon, SearchIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Hint } from "@/components/hint"
@@ -170,7 +170,7 @@ function CatalogList({
       ) : (
         groups.map(([category, list]) => (
           <section key={category} className="flex flex-col gap-2" aria-label={category}>
-            <h3 className="text-xs font-medium text-muted-foreground">{category}</h3>
+            <h3 className="text-xs font-medium text-muted-foreground terminal:font-semibold terminal:tracking-wider terminal:uppercase">{category}</h3>
             <ItemGroup className="gap-2">
               {list.map((e) => (
                 <Item key={e.spec.id} variant="outline" size="sm" className="flex-wrap">
@@ -186,7 +186,7 @@ function CatalogList({
                       )}
                       {e.spec.tested === false && (
                         <Hint label="Its commands were written from the CLI's docs but haven't been run against it yet. Test it, and please report what doesn't work.">
-                          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
+                          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400 terminal:border-warning/50 terminal:text-warning terminal:dark:text-warning">
                             untested
                           </Badge>
                         </Hint>

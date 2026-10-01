@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ChevronDownIcon, ChevronUpIcon, SearchIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronUpIcon, SearchIcon } from "@/components/icons"
 
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText } from "@/components/ui/input-group"
 import { Hint } from "@/components/hint"
@@ -67,7 +67,12 @@ export function HighlightedLine({ text, re, current }: { text: string; re: RegEx
     parts.push(
       <mark
         key={start}
-        className={cn("rounded-sm text-inherit", current ? "bg-orange-400/80 dark:bg-orange-500/70" : "bg-yellow-300/70 dark:bg-yellow-500/35")}
+        className={cn(
+          "rounded-sm text-inherit terminal:rounded-none",
+          current
+            ? "bg-orange-400/80 dark:bg-orange-500/70 terminal:bg-match-current terminal:dark:bg-match-current"
+            : "bg-yellow-300/70 dark:bg-yellow-500/35 terminal:bg-match terminal:dark:bg-match"
+        )}
       >
         {m[0]}
       </mark>

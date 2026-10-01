@@ -81,3 +81,11 @@ export function useStyle(): StyleState {
   if (!ctx) throw new Error("useStyle must be used within a StyleProvider")
   return ctx
 }
+
+/**
+ * The active style id, or "classic" outside a StyleProvider. For presentational code
+ * (icons, decorations) that must never throw.
+ */
+export function useStyleId(): StyleId {
+  return React.useContext(StyleContext)?.style ?? DEFAULT_STYLE
+}

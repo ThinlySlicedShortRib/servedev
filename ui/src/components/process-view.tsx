@@ -1,10 +1,11 @@
 import * as React from "react"
-import { ExternalLinkIcon } from "lucide-react"
+import { ExternalLinkIcon } from "@/components/icons"
 
 import { Badge } from "@/components/ui/badge"
 import { Hint, TruncatedText } from "@/components/hint"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { api, type ProcessGroup } from "@/lib/api"
+import { useStyleId } from "@/components/style-provider"
 
 /** Live process groups for a server; polls while `enabled`. */
 export function useProcessGroups(serverId: string | undefined, enabled: boolean, intervalMs = 2000) {
@@ -40,6 +41,7 @@ function explain(groups: ProcessGroup[]): string {
 }
 
 export function ProcessView({ groups, running }: { groups: ProcessGroup[] | null; running: boolean }) {
+  const terminal = useStyleId() === "terminal"
   if (!running) return <p className="px-4 py-6 text-sm text-muted-foreground md:px-6">No processes. The server isn't running.</p>
   if (!groups) return <p className="px-4 py-6 text-sm text-muted-foreground md:px-6">Loading processes…</p>
 
@@ -63,7 +65,7 @@ export function ProcessView({ groups, running }: { groups: ProcessGroup[] | null
                 <li key={p.pid} className="flex min-w-0 items-center gap-3 px-3 py-1 text-xs">
                   <span className="w-12 shrink-0 font-mono text-muted-foreground tabular-nums">{p.pid}</span>
                   <span className="flex min-w-0 flex-1 font-mono" style={{ paddingLeft: `${p.depth * 16}px` }}>
-                    {p.depth > 0 && <span className="shrink-0 text-muted-foreground">└&nbsp;</span>}
+                    {p.depth > 0 && <span className="shrink-0 text-muted-foreground">{terminal ? "└─" : "└"}&nbsp;</span>}
                     <TruncatedText text={p.command} />
                   </span>
                   {p.ports.map((port) => (

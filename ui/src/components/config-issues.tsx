@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ChevronDownIcon, CircleAlertIcon, TriangleAlertIcon } from "lucide-react"
+import { ChevronDownIcon, CircleAlertIcon, TriangleAlertIcon } from "@/components/icons"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"

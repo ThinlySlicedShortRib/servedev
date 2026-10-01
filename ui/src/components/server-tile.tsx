@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CopyIcon, ExternalLinkIcon, GripVerticalIcon, Maximize2Icon, PlayIcon, RotateCwIcon, SearchIcon, SquareIcon, XIcon } from "lucide-react"
+import { CopyIcon, ExternalLinkIcon, GripVerticalIcon, Maximize2Icon, PlayIcon, RotateCwIcon, SearchIcon, SquareIcon, XIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { AccountTag } from "@/components/account-tag"
@@ -23,7 +23,7 @@ const MAX_LINES = 400
 
 function lineClass(line: string) {
   if (/\b(\w*Error|error|ERROR|failed|FAILED|exception|fatal|panic)\b/.test(line) && !/DeprecationWarning/.test(line)) return "text-destructive"
-  if (/\bwarn(ing)?\b/i.test(line)) return "text-amber-600 dark:text-amber-400"
+  if (/\bwarn(ing)?\b/i.test(line)) return "text-amber-600 dark:text-amber-400 terminal:text-warning terminal:dark:text-warning"
   return undefined
 }
 
@@ -116,11 +116,11 @@ export function ServerTile({
     <div
       className={cn(
         // A container, so the header can adapt to the tile's own width as it's resized.
-        "@container/tile flex h-full flex-col overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xs",
+        "@container/tile flex h-full flex-col overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xs terminal:rounded-none",
         selected && "ring-2 ring-ring"
       )}
     >
-      <div className={cn(DRAG_HANDLE, "flex cursor-grab items-center gap-2 border-b px-2 py-1.5 active:cursor-grabbing")}>
+      <div className={cn(DRAG_HANDLE, "flex cursor-grab items-center gap-2 border-b px-2 py-1.5 active:cursor-grabbing terminal:bg-muted/60 terminal:py-1")}>
         <GripVerticalIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <StatusDot status={s.status} />
         <Hint label={`Show ${s.project} / ${s.name} in Single view, with details, processes and preview`}>
@@ -204,12 +204,12 @@ export function ServerTile({
             const el = e.currentTarget
             stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
           }}
-          className="relative min-h-0 flex-1 overflow-auto bg-muted/40 px-2.5 py-2 pr-8 font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap"
+          className="log-lines relative min-h-0 flex-1 overflow-auto bg-muted/40 px-2.5 py-2 pr-8 font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap terminal:bg-terminal"
         >
           <LineCopy container={logRef} lines={lines} />
           {lines.length ? (
             lines.map((l, i) => (
-              <div key={i} data-line={i} className={cn(lineClass(l), i === search.currentLine && "-mx-1 rounded-sm bg-orange-400/10 px-1")}>
+              <div key={i} data-line={i} className={cn(lineClass(l), i === search.currentLine && "-mx-1 rounded-sm bg-orange-400/10 px-1 terminal:rounded-none terminal:bg-match/40 terminal:shadow-[inset_2px_0_0_var(--warning)]")}>
                 {search.matchSet.has(i) ? <HighlightedLine text={l} re={search.re} current={i === search.currentLine} /> : l || " "}
               </div>
             ))

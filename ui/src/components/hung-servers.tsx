@@ -1,5 +1,5 @@
 import * as React from "react"
-import { BrushCleaningIcon } from "lucide-react"
+import { BrushCleaningIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Hint } from "@/components/hint"

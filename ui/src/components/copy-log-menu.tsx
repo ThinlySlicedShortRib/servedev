@@ -1,4 +1,4 @@
-import { BotIcon, ChevronDownIcon, CopyIcon, ListFilterIcon, ScrollTextIcon } from "lucide-react"
+import { BotIcon, ChevronDownIcon, CopyIcon, ListFilterIcon, ScrollTextIcon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { Hint } from "@/components/hint"

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CircleAlertIcon, EllipsisIcon, InfoIcon, KeyRoundIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
+import { CircleAlertIcon, EllipsisIcon, InfoIcon, KeyRoundIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "@/components/icons"
 import { toast } from "sonner"
 
 import { AccountPicker } from "@/components/account-picker"
@@ -71,7 +71,7 @@ export function AccountsSheet() {
         <SheetTrigger render={<Button variant="outline" size="sm" className="relative" />}>
           <KeyRoundIcon data-icon="inline-start" />
           <span className="max-sm:hidden">Accounts</span>
-          {warnings > 0 && <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-500" aria-label={`${warnings} warnings`} />}
+          {warnings > 0 && <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-500 terminal:rounded-[1px] terminal:bg-warning" aria-label={`${warnings} warnings`} />}
         </SheetTrigger>
       </Hint>
       <SheetContent className="gap-0 sm:max-w-md">

@@ -1,0 +1,585 @@
+/*
+ * Terminal style: a TUI rendered in the browser. Black and phosphor green in dark,
+ * green ink on pale paper in light. Every rule here is scoped to [data-style="terminal"]
+ * (set on <html> by style-provider.tsx), so Classic is untouched.
+ *
+ * Unlayered on purpose: these rules beat Tailwind's utilities where a primitive needs
+ * a different look (focus rings, shadows, panel animations).
+ */
+
+/* Light: "paper terminal". Green ink on pale paper. */
+:root[data-style="terminal"] {
+    --style-font-sans: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --style-font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --style-text-sm: 0.8125rem;
+    --style-text-sm-line-height: 1.5;
+    --background: #eef3ea;
+    --foreground: #0a3a14;
+    --card: #f6f9f3;
+    --card-foreground: #0a3a14;
+    --popover: #f6f9f3;
+    --popover-foreground: #0a3a14;
+    --primary: #0b6b2a;
+    --primary-foreground: #f6f9f3;
+    --secondary: #dde9da;
+    --secondary-foreground: #0a3a14;
+    --muted: #e2ece0;
+    --muted-foreground: #2f6b3c;
+    --accent: #d4e8d4;
+    --accent-foreground: #0a3a14;
+    --destructive: #b3261e;
+    --border: #c3d6c1;
+    --input: #6f9474;
+    --ring: #0b6b2a;
+    --terminal: #f9fbf7;
+    --success: #0b6b2a;
+    --warning: #7a4a00;
+    --info: #0b5f57;
+    --match: #cfe9a8;
+    --match-current: #e9b949;
+    --drop: rgb(10 58 20 / 0.16);
+    --chart-1: #0b6b2a;
+    --chart-2: #2f6b3c;
+    --chart-3: #0b5f57;
+    --chart-4: #7a4a00;
+    --chart-5: #b3261e;
+    --radius: 0.125rem;
+    --sidebar: #e4ede1;
+    --sidebar-foreground: #0a3a14;
+    --sidebar-primary: #0b6b2a;
+    --sidebar-primary-foreground: #f6f9f3;
+    --sidebar-accent: #d4e8d4;
+    --sidebar-accent-foreground: #0a3a14;
+    --sidebar-border: #c3d6c1;
+    --sidebar-ring: #0b6b2a;
+}
+
+/* Dark: P1 phosphor green on black. */
+:root[data-style="terminal"].dark {
+    --background: #030603;
+    --foreground: #39f06a;
+    --card: #071009;
+    --card-foreground: #39f06a;
+    --popover: #071009;
+    --popover-foreground: #39f06a;
+    --primary: #33ff66;
+    --primary-foreground: #000000;
+    --secondary: #0b1f0f;
+    --secondary-foreground: #39f06a;
+    --muted: #0a170c;
+    --muted-foreground: #1fae47;
+    --accent: #0d2a14;
+    --accent-foreground: #5dff88;
+    --destructive: #ff4d4d;
+    --border: #13361b;
+    --input: #1f6b33;
+    --ring: #33ff66;
+    --terminal: #000000;
+    --success: #33ff66;
+    --warning: #ffb000;
+    --info: #5fe0d0;
+    --match: #1d4a1d;
+    --match-current: #6b5200;
+    --drop: rgb(0 0 0 / 0.6);
+    --chart-1: #33ff66;
+    --chart-2: #1fae47;
+    --chart-3: #5fe0d0;
+    --chart-4: #ffb000;
+    --chart-5: #ff4d4d;
+    --sidebar: #000000;
+    --sidebar-foreground: #39f06a;
+    --sidebar-primary: #33ff66;
+    --sidebar-primary-foreground: #000000;
+    --sidebar-accent: #0d2a14;
+    --sidebar-accent-foreground: #5dff88;
+    --sidebar-border: #0f2c16;
+    --sidebar-ring: #33ff66;
+}
+
+/* ---------- Base ---------- */
+:root[data-style="terminal"] {
+  color-scheme: light;
+}
+:root[data-style="terminal"].dark {
+  color-scheme: dark;
+}
+[data-style="terminal"] body {
+  /* Ligatures turn log text like => and != into glyphs; a terminal shows what was printed. */
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+[data-style="terminal"] * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--input) transparent;
+}
+/* Inverse video, like selecting in a terminal. */
+[data-style="terminal"] ::selection {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  text-shadow: none;
+}
+/* A block caret in every field. */
+[data-style="terminal"] :is(input, textarea, [contenteditable]) {
+  caret-color: var(--primary);
+  caret-shape: block;
+}
+
+/* Phosphor: a faint glow on text in dark mode, strongest in the logs, like a CRT. */
+[data-style="terminal"].dark body {
+  text-shadow: 0 0 1px color-mix(in oklab, currentColor 35%, transparent);
+}
+[data-style="terminal"].dark .bg-terminal {
+  text-shadow: 0 0 4px color-mix(in oklab, currentColor 45%, transparent);
+}
+/* Inverse-video blocks (green or red fills) print crisp text: no bloom. */
+[data-style="terminal"].dark :is(.bg-primary, .bg-destructive, .bg-success, [aria-pressed="true"], [role="tab"][data-active], [data-slot="tooltip-content"], .status-tag) {
+  text-shadow: none;
+}
+[data-style="terminal"].dark .phosphor-glow {
+  text-shadow: 0 0 6px color-mix(in oklab, currentColor 70%, transparent);
+}
+
+/* ---------- Flat panels, hard TUI drop shadows ---------- */
+[data-style="terminal"] :is(.shadow-2xs, .shadow-xs, .shadow-sm) {
+  --tw-shadow: 0 0 #0000;
+}
+[data-style="terminal"] .shadow-md {
+  --tw-shadow: 3px 3px 0 0 var(--drop);
+}
+[data-style="terminal"] .shadow-lg {
+  --tw-shadow: 4px 4px 0 0 var(--drop);
+}
+[data-style="terminal"] .shadow-xl {
+  --tw-shadow: 6px 6px 0 0 var(--drop);
+}
+/* Overlays dim instead of blurring. */
+[data-style="terminal"] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) {
+  backdrop-filter: none;
+  background-color: rgb(0 0 0 / 0.25);
+}
+[data-style="terminal"].dark :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) {
+  background-color: rgb(0 0 0 / 0.5);
+}
+
+/* ---------- Focus: a solid 2px cursor-colored box instead of a soft glow ---------- */
+[data-style="terminal"] :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  --tw-ring-shadow: 0 0 #0000;
+}
+[data-style="terminal"] :is([data-sidebar], [data-slot="scroll-area-viewport"]):focus-visible {
+  outline-offset: -2px;
+}
+/* Menu and list items show focus as the highlighted row, like a TUI cursor. */
+[data-style="terminal"] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [data-slot="input-group-control"]):focus-visible {
+  outline: none;
+}
+[data-style="terminal"] [data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible) {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  --tw-ring-shadow: 0 0 #0000;
+}
+
+/* ---------- Grid ---------- */
+[data-style="terminal"] .react-grid-item.react-grid-placeholder {
+  border-radius: 0;
+  outline: 1px dashed var(--primary);
+}
+
+/* ---------- Motion ---------- */
+
+/* Braille spinner: six dots of a cell with a two-dot gap chasing clockwise (⠋⠙⠹⠸⠼⠴). */
+.braille-spinner rect {
+  animation: term-braille 0.6s steps(1, end) infinite;
+}
+@keyframes term-braille {
+  0% { opacity: 1; }
+  66.6% { opacity: 0.18; }
+}
+[data-style="terminal"].dark .status-glyph[data-status="running"] {
+  filter: drop-shadow(0 0 2px var(--success));
+}
+[data-style="terminal"].dark .status-glyph[data-status="crashed"] {
+  filter: drop-shadow(0 0 2px var(--destructive));
+}
+
+/* Phosphor decay: freshly printed log lines flash bright, then settle. Only the newest rows
+   match, and an animation only plays when an element starts matching, so long logs cost nothing. */
+[data-style="terminal"] .log-lines > :nth-last-child(-n + 8 of [data-line]) {
+  animation: term-phosphor 1.2s ease-out;
+}
+@keyframes term-phosphor {
+  from { background-color: color-mix(in oklab, var(--primary) 16%, transparent); }
+  to { background-color: transparent; }
+}
+[data-style="terminal"].dark .log-lines > :nth-last-child(-n + 8 of [data-line]) {
+  animation-name: term-phosphor-dark;
+}
+@keyframes term-phosphor-dark {
+  from {
+    color: #eafff0;
+    text-shadow: 0 0 6px var(--primary), 0 0 12px color-mix(in oklab, var(--primary) 60%, transparent);
+  }
+}
+
+/* Floating panels draw in like a TUI window (top to bottom, in steps) and vanish instantly. */
+[data-style="terminal"] :is([data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="select-content"], [data-slot="combobox-content"], [data-slot="dropdown-menu-sub-content"])[data-open] {
+  animation: term-draw 90ms steps(4, end);
+}
+[data-style="terminal"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"])[data-open] {
+  animation: term-draw 120ms steps(5, end);
+}
+[data-style="terminal"] :is([data-slot="dropdown-menu-content"], [data-slot="popover-content"], [data-slot="select-content"], [data-slot="combobox-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="dialog-content"], [data-slot="alert-dialog-content"], [data-slot="tooltip-content"])[data-closed],
+[data-style="terminal"] [data-slot="tooltip-content"]:is([data-open], [data-state="delayed-open"]) {
+  animation: none;
+}
+@keyframes term-draw {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+/* Blinking block cursor. */
+@keyframes term-cursor-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+.term-cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.05em;
+  vertical-align: -0.15em;
+  background: var(--primary);
+  animation: term-cursor-blink 1.06s steps(1, end) infinite;
+}
+[data-style="terminal"].dark .term-cursor {
+  box-shadow: 0 0 6px var(--primary);
+}
+
+/* ---------- Status tags: [ RUNNING ], [ CRASHED (EXIT 1) ] ---------- */
+[data-style="terminal"] .status-tag {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+[data-style="terminal"] .status-tag::before {
+  content: "[" / "";
+  margin-right: 0.35em;
+  opacity: 0.7;
+}
+[data-style="terminal"] .status-tag::after {
+  content: "]" / "";
+  margin-left: 0.35em;
+  opacity: 0.7;
+}
+
+/* ---------- Sidebar tree: ├─ and └─ connecting each server to its project ---------- */
+[data-style="terminal"] .tree-row {
+  position: relative;
+}
+[data-style="terminal"] .tree-row::before,
+[data-style="terminal"] .tree-row::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  background: var(--input);
+}
+[data-style="terminal"].dark .tree-row::before,
+[data-style="terminal"].dark .tree-row::after {
+  background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+}
+[data-style="terminal"] .tree-row::before {
+  left: 0.875rem;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+[data-style="terminal"] .tree-row:last-child::before {
+  bottom: auto;
+  height: 1.5rem;
+}
+[data-style="terminal"] .tree-row::after {
+  left: 0.875rem;
+  top: 1.5rem;
+  width: 0.5rem;
+  height: 1px;
+}
+[data-style="terminal"] [data-collapsible="icon"] .tree-row::before,
+[data-style="terminal"] [data-collapsible="icon"] .tree-row::after {
+  display: none;
+}
+
+/* ---------- CRT ---------- */
+/* Power-on flicker when the dashboard connects (or reconnects). Dark only. */
+.crt-power {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+  background: var(--primary);
+  opacity: 0;
+  animation: term-crt-power 420ms steps(1, end) forwards;
+}
+@keyframes term-crt-power {
+  0% { opacity: 0.1; }
+  12% { opacity: 0; }
+  24% { opacity: 0.06; }
+  36% { opacity: 0; }
+  60% { opacity: 0.03; }
+  72%, 100% { opacity: 0; }
+}
+:root:not(.dark) .crt-power {
+  display: none;
+}
+/* Very faint scanlines and vignette over everything, dark only. */
+.crt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+  display: none;
+}
+.dark .crt-overlay {
+  display: block;
+  background:
+    repeating-linear-gradient(to bottom, rgb(0 0 0 / 0.12) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 62%, rgb(0 0 0 / 0.38) 100%);
+}
+[data-style="terminal"].dark .pixel-logo {
+  filter: drop-shadow(0 0 3px var(--primary));
+}
+
+/* Boot sequence: a few lines typed out on first load, gone in ~0.7s. Never takes clicks. */
+.boot-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 2rem 2.25rem;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  animation: term-boot-out 180ms steps(3, end) 560ms forwards;
+}
+.boot-screen > div {
+  white-space: pre;
+  overflow: hidden;
+  width: 0;
+  animation: term-boot-type 110ms steps(24, end) forwards;
+}
+@keyframes term-boot-type {
+  to { width: 100%; }
+}
+@keyframes term-boot-out {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* ---------- Toasts: a TUI message box ---------- */
+[data-style="terminal"] .toaster [data-sonner-toast] {
+  border-radius: 0;
+  border-left: 3px solid var(--primary);
+  box-shadow: 4px 4px 0 0 var(--drop);
+  font-family: var(--font-mono);
+}
+[data-style="terminal"] .toaster [data-sonner-toast][data-type="error"] {
+  border-left-color: var(--destructive);
+}
+[data-style="terminal"] .toaster [data-sonner-toast][data-type="warning"] {
+  border-left-color: var(--warning);
+}
+[data-style="terminal"] .toaster [data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--success);
+}
+[data-style="terminal"] .toaster [data-sonner-toast][data-type="error"] [data-icon] {
+  color: var(--destructive);
+}
+[data-style="terminal"] .toaster [data-sonner-toast][data-type="warning"] [data-icon] {
+  color: var(--warning);
+}
+
+/* ---------- Reduced motion / more contrast ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .braille-spinner rect,
+  .term-cursor,
+  [data-style="terminal"] .log-lines > *,
+  .crt-power,
+  .boot-screen {
+    animation: none !important;
+  }
+  .crt-power,
+  .boot-screen {
+    display: none;
+  }
+  [data-style="terminal"] [data-slot][data-open] {
+    animation: none !important;
+  }
+}
+@media (prefers-reduced-motion: reduce), (prefers-contrast: more) {
+  .dark .crt-overlay {
+    display: none;
+  }
+}
+@media (prefers-contrast: more) {
+  [data-style="terminal"].dark body,
+  [data-style="terminal"].dark .bg-terminal,
+  [data-style="terminal"].dark .phosphor-glow {
+    text-shadow: none;
+  }
+}
+
+/* ---------- Primitives ----------
+ * Keyed on shadcn's data-slot (or, for parts that a Hint/Tooltip wraps and so get
+ * data-slot="tooltip-trigger", on their stable group/* class or ARIA role), so the
+ * primitive .tsx files stay exactly Classic. */
+/* Instant state changes: a cursor jumps, it doesn't fade. */
+[data-style="terminal"] :is([class~="group/button"], [class~="group/toggle"], [role="tab"], [role="tab"]::after) {
+  transition: none;
+}
+/* Floating panels: a clearer 1px frame. */
+[data-style="terminal"] :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"], [data-slot="select-content"], [data-slot="combobox-content"]) {
+  --tw-ring-color: color-mix(in oklab, var(--foreground) 22%, transparent);
+}
+/* Dialogs and sheets: double-line TUI window frames. */
+[data-style="terminal"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) {
+  border: 3px double color-mix(in oklab, var(--primary) 70%, transparent);
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-shadow: 6px 6px 0 0 var(--drop);
+}
+[data-style="terminal"] [data-slot="sheet-content"] {
+  --tw-shadow: 6px 6px 0 0 var(--drop);
+}
+[data-style="terminal"] [data-slot="sheet-content"][data-side="right"] {
+  border-left: 3px double color-mix(in oklab, var(--primary) 70%, transparent);
+}
+[data-style="terminal"] [data-slot="sheet-content"][data-side="left"] {
+  border-right: 3px double color-mix(in oklab, var(--primary) 70%, transparent);
+}
+[data-style="terminal"] :is([data-slot="dialog-title"], [data-slot="sheet-title"], [data-slot="alert-dialog-title"]) {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+[data-style="terminal"] :is([data-slot="dialog-title"], [data-slot="sheet-title"])::before {
+  content: "▍" / "";
+  margin-right: 0.375rem;
+  color: var(--primary);
+}
+/* Alerts: a heavy left rule. */
+[data-style="terminal"] [data-slot="alert"] {
+  border-left: 4px solid var(--primary);
+}
+[data-style="terminal"] [data-slot="alert"].text-destructive {
+  border-color: color-mix(in oklab, var(--destructive) 70%, transparent);
+  border-left-color: var(--destructive);
+  background-color: color-mix(in oklab, var(--destructive) 10%, transparent);
+}
+/* Badges, checkboxes, switches, scroll thumbs: squared off. */
+[data-style="terminal"] [class~="group/badge"] {
+  border-radius: var(--radius-sm);
+}
+[data-style="terminal"] [data-slot="checkbox"] {
+  border-radius: 2px;
+}
+[data-style="terminal"] [data-slot="switch"] {
+  border-radius: var(--radius-sm);
+}
+[data-style="terminal"] [data-slot="switch-thumb"] {
+  border-radius: 1px;
+}
+[data-style="terminal"] [data-slot="scroll-area-thumb"] {
+  border-radius: 0;
+  background-color: var(--input);
+}
+/* Keycaps: [/] [N]. */
+[data-style="terminal"] [data-slot="kbd"] {
+  border: 1px solid var(--input);
+  border-bottom-width: 2px;
+  border-radius: 2px;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+[data-style="terminal"] [data-slot="tooltip-content"] [data-slot="kbd"] {
+  border-color: color-mix(in oklab, var(--background) 50%, transparent);
+  background: transparent;
+  color: var(--background);
+}
+/* Empty states: a dashed frame and a boxed icon. */
+[data-style="terminal"] [data-slot="empty"] {
+  border-radius: 0;
+}
+[data-style="terminal"] [data-slot="empty-icon"][data-variant="icon"] {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0;
+  border: 1px solid color-mix(in oklab, var(--primary) 60%, transparent);
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  color: var(--primary);
+  box-shadow: 3px 3px 0 0 var(--drop);
+}
+[data-style="terminal"] [data-slot="empty-icon"][data-variant="icon"] svg:not([class*="size-"]) {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+/* Tabs: a tab bar where the current tab is inverse video (tmux's current window). */
+[data-style="terminal"] [data-slot="tabs-list"][data-variant="default"] {
+  gap: 1px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+[data-style="terminal"] [data-slot="tabs-list"][data-variant="default"] [role="tab"] {
+  border-radius: 0;
+  border-color: transparent;
+  padding-inline: 0.625rem;
+  color: var(--muted-foreground);
+  --tw-shadow: 0 0 #0000;
+}
+[data-style="terminal"] [data-slot="tabs-list"][data-variant="default"] [role="tab"]:hover {
+  color: var(--foreground);
+}
+[data-style="terminal"] [data-slot="tabs-list"][data-variant="default"] [role="tab"][data-active] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+}
+[data-style="terminal"] [data-slot="tabs-list"][data-variant="default"] [role="tab"][data-active] * {
+  color: color-mix(in oklab, var(--primary-foreground) 80%, transparent);
+}
+/* Pressed toggles (status filters, Single / Custom grid): inverse video. */
+[data-style="terminal"] [class~="group/toggle"][aria-pressed="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+}
+[data-style="terminal"] [class~="group/toggle"][aria-pressed="true"] * {
+  color: var(--primary-foreground);
+}
+/* Sidebar: wider for monospace; project headers drawn as label + rule; a marker on the current row. */
+[data-style="terminal"] [data-slot="sidebar-wrapper"] {
+  --sidebar-width: 18rem !important;
+}
+[data-style="terminal"] [data-sidebar="sidebar"][data-mobile="true"] {
+  --sidebar-width: 19rem !important;
+}
+[data-style="terminal"] [data-sidebar="group-label"] {
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+[data-style="terminal"] [data-sidebar="group-label"]::after {
+  content: "";
+  flex: 1;
+  min-width: 1rem;
+  height: 1px;
+  background: var(--sidebar-border);
+}
+[data-style="terminal"] [data-sidebar="menu-button"][data-active] {
+  box-shadow: inset 2px 0 0 var(--sidebar-primary);
+}

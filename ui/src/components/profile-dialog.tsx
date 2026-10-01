@@ -1,5 +1,5 @@
 import * as React from "react"
-import { GitBranchIcon, UsersIcon } from "lucide-react"
+import { GitBranchIcon, UsersIcon } from "@/components/icons"
 
 import { Hint, TruncatedText } from "@/components/hint"
 import { ProfileAccounts } from "@/components/profile-accounts"

@@ -1,4 +1,4 @@
-import { MonitorIcon, MoonIcon, PaletteIcon, SunIcon } from "lucide-react"
+import { MonitorIcon, MoonIcon, PaletteIcon, SunIcon } from "@/components/icons"
 
 import { Hint } from "@/components/hint"
 import { STYLES, useStyle, type StyleId } from "@/components/style-provider"
