@@ -125,7 +125,7 @@ export function LogView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-4 px-4 py-2 md:px-6 studio:gap-3 studio:border-b">
+      <div className="flex flex-wrap items-center gap-4 px-4 py-2 md:px-6 studio:gap-3 studio:border-b friendly:gap-3 friendly:px-5 friendly:py-3 friendly:md:px-7">
         {runs.length > 1 && (
           <Select items={items} value={choice} onValueChange={(v) => v && setChoice(String(v))}>
             <Hint label="Choose a run: the current one, or an earlier start of this server (kept for the log retention period)">
@@ -171,10 +171,10 @@ export function LogView({
           {query ? `${search.matches.length} matching ${search.matches.length === 1 ? "line" : "lines"} of ${total}` : `${total} ${total === 1 ? "line" : "lines"}`}
         </span>
       </div>
-      <ScrollArea ref={rootRef} className="min-h-0 flex-1 bg-muted/40 terminal:border-t terminal:bg-terminal studio:bg-surface-sunken">
+      <ScrollArea ref={rootRef} className="min-h-0 flex-1 bg-muted/40 terminal:border-t terminal:bg-terminal studio:bg-surface-sunken friendly:mx-3 friendly:mb-3 friendly:rounded-2xl friendly:border friendly:bg-log friendly:text-log-foreground friendly:shadow-xs friendly:md:mx-5 friendly:md:mb-5">
         {/* Studio style: a shadow that fades in once the log is scrolled. */}
         {studio && <div aria-hidden className="studio-scroll-shadow pointer-events-none sticky top-0 z-10 -mb-2 h-2" />}
-        <pre ref={preRef} className="log-lines relative px-4 py-3 pr-9 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap md:px-6 md:pr-9 studio:leading-[1.6] studio:text-foreground/90">
+        <pre ref={preRef} className="log-lines relative px-4 py-3 pr-9 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap md:px-6 md:pr-9 studio:leading-[1.6] studio:text-foreground/90 friendly:pl-2 friendly:text-[12.5px] friendly:leading-[1.7] friendly:md:pl-3">
           <LineCopy container={preRef} lines={lines} className="md:right-2" />
           {lines.length
             ? lines.map((l, i) => (

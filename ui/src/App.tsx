@@ -7,6 +7,7 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { ConfigIssues } from "@/components/config-issues"
 import { CrtPower } from "@/components/terminal-decor"
 import { ServersIllustration } from "@/components/studio-decor"
+import { EmptyServersArt } from "@/components/friendly-decor"
 import { useStyleId } from "@/components/style-provider"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Hint, TruncatedText } from "@/components/hint"
@@ -70,7 +71,9 @@ export function App() {
   const { servers, configured, profiles, config, connected, layoutChange, accountsVersion } = useServedev()
   const accounts = useAccounts(accountsVersion)
   const now = useNow()
-  const studio = useStyleId() === "studio"
+  const styleId = useStyleId()
+  const studio = styleId === "studio"
+  const friendly = styleId === "friendly"
   const [profileId, setProfileId] = React.useState<string | null>(loadProfileId)
   const activeProfile = profiles.find((p) => p.id === profileId)
   // A profile saved before profiles moved to config files: its old numeric id maps to a new one.
@@ -245,13 +248,13 @@ export function App() {
         onNew={() => setCreating(true)}
       />
       <SidebarInset className="h-svh min-w-0 overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 terminal:bg-sidebar studio:bg-background/80 studio:backdrop-blur-sm">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 terminal:bg-sidebar studio:bg-background/80 studio:backdrop-blur-sm friendly:h-14 friendly:bg-background/85 friendly:backdrop-blur-sm friendly:md:px-5">
           <Hint label="Shrink or expand the sidebar (⌘B)">
             <SidebarTrigger className="-ml-1" />
           </Hint>
-          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4 studio:mr-1.5" />
+          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4 studio:mr-1.5 friendly:mr-1 friendly:data-vertical:h-5 friendly:data-vertical:self-center" />
           <TruncatedText
-            className="text-sm text-muted-foreground"
+            className="text-sm text-muted-foreground friendly:font-semibold"
             text={view === "grid"
               ? activeProfile
                 ? activeProfile.kind === "shared"
@@ -369,6 +372,10 @@ export function App() {
                   <EmptyMedia>
                     <ServersIllustration />
                   </EmptyMedia>
+                ) : friendly ? (
+                  <EmptyMedia className="friendly-rise">
+                    <EmptyServersArt />
+                  </EmptyMedia>
                 ) : (
                   <EmptyMedia variant="icon">
                     <ServerIcon />
@@ -418,9 +425,9 @@ export function App() {
               , with their logs and run history, and takes them off any profiles and grids. The folder and its files are not touched.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <ul className="max-h-60 overflow-auto rounded-lg border py-1 text-sm">
+          <ul className="max-h-60 overflow-auto rounded-lg border py-1 text-sm friendly:rounded-xl friendly:bg-card friendly:py-1.5">
             {removingProject?.entries.map((e) => (
-              <li key={e.key} className="flex items-center gap-2 px-3 py-1">
+              <li key={e.key} className="flex items-center gap-2 px-3 py-1 friendly:px-3.5 friendly:py-1.5">
                 <span className="font-medium">{e.name}</span>
                 <span className="text-muted-foreground">{e.server && ACTIVE.includes(e.server.status) ? "running, will be stopped" : e.server?.status}</span>
               </li>

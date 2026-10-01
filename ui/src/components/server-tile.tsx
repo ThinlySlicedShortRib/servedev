@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { copyText, lineCount } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
+import { useStyleId } from "@/components/style-provider"
+import { useStatusFx } from "@/hooks/use-status-fx"
 import { ACTIVE, api, openUrl, portOf, statusLabel, type Server } from "@/lib/api"
 
 /** Class names react-grid-layout uses to decide what drags a tile and what doesn't. */
@@ -88,6 +90,8 @@ export function ServerTile({
   const stick = React.useRef(true)
   const [searching, setSearching] = React.useState(false)
   const [query, setQuery] = React.useState("")
+  // Friendly style: a tile shakes once when its server crashes while you watch.
+  const statusFx = useStatusFx(s.status, useStyleId() === "friendly")
 
   const lines = React.useMemo(() => {
     const all = log.split("\n")
@@ -119,15 +123,18 @@ export function ServerTile({
         "group/tile @container/tile flex h-full flex-col overflow-hidden rounded-lg border bg-card text-card-foreground shadow-xs terminal:rounded-none studio:transition-[box-shadow,border-color] studio:duration-200 studio:hover:shadow-sm",
         // Studio style: a crashed tile is edged in red and flashes once (studio.css).
         s.status === "crashed" && "studio-crash-flash studio:border-destructive/50 studio:ring-1 studio:ring-destructive/30",
-        selected && "ring-2 ring-ring"
+        "friendly:rounded-2xl friendly:shadow-sm friendly:transition-[box-shadow,border-color] friendly:duration-300 friendly:hover:shadow-md",
+        s.status === "crashed" && "friendly:border-status-crashed/30",
+        statusFx === "crash" && "friendly-shake",
+        selected && "ring-2 ring-ring friendly:ring-offset-2 friendly:ring-offset-background"
       )}
     >
-      <div className={cn(DRAG_HANDLE, "flex cursor-grab items-center gap-2 border-b px-2 py-1.5 active:cursor-grabbing terminal:bg-muted/60 terminal:py-1 studio:h-9 studio:py-0", s.status === "crashed" && "studio:bg-destructive/[0.06]")}>
+      <div className={cn(DRAG_HANDLE, "flex cursor-grab items-center gap-2 border-b px-2 py-1.5 active:cursor-grabbing terminal:bg-muted/60 terminal:py-1 studio:h-9 studio:py-0 friendly:flex-wrap friendly:gap-x-2 friendly:gap-y-1 friendly:bg-card friendly:px-3 friendly:py-2", s.status === "crashed" && "studio:bg-destructive/[0.06] friendly:bg-status-crashed-soft/60")}>
         <GripVerticalIcon className="size-3.5 shrink-0 text-muted-foreground studio:text-muted-foreground/60" aria-hidden />
         <StatusDot status={s.status} />
         <Hint label={`Show ${s.project} / ${s.name} in Single view, with details, processes and preview`}>
-          <button type="button" className={cn(NO_DRAG, "flex min-w-0 items-baseline gap-1.5 text-left")} onClick={onOpenDetails}>
-            <TruncatedText text={s.name} className={cn("text-sm font-medium", s.status === "crashed" && "studio:text-destructive")} />
+          <button type="button" className={cn(NO_DRAG, "flex min-w-0 items-baseline gap-1.5 text-left friendly:min-w-[6.5rem] friendly:flex-1 friendly:basis-0 friendly:rounded-md friendly:outline-none friendly:focus-visible:ring-4 friendly:focus-visible:ring-ring/35")} onClick={onOpenDetails}>
+            <TruncatedText text={s.name} className={cn("text-sm font-medium friendly:font-bold", s.status === "crashed" && "studio:text-destructive")} />
             <TruncatedText text={s.project} className="text-xs text-muted-foreground @max-[30rem]/tile:hidden" />
             {s.branch && <BranchTag branch={s.branch} className="self-center @max-[36rem]/tile:hidden" />}
             <AccountTag server={s} className="max-w-48 self-center @max-[44rem]/tile:hidden" />
@@ -140,7 +147,7 @@ export function ServerTile({
         ) : (
           <TruncatedText text={statusLabel(s)} className="text-xs text-muted-foreground" />
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-0.5 studio:text-muted-foreground studio:opacity-70 studio:transition-opacity studio:duration-150 studio:group-hover/tile:opacity-100 studio:focus-within:opacity-100">
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 friendly:gap-px studio:text-muted-foreground studio:opacity-70 studio:transition-opacity studio:duration-150 studio:group-hover/tile:opacity-100 studio:focus-within:opacity-100">
           <IconAction label={searching ? "Close search" : "Search logs"} onClick={() => (searching ? closeSearch() : setSearching(true))}>
             <SearchIcon />
           </IconAction>
@@ -186,7 +193,7 @@ export function ServerTile({
       </div>
 
       {searching && (
-        <div className={cn(NO_DRAG, "border-b px-2 py-1.5")}>
+        <div className={cn(NO_DRAG, "border-b px-2 py-1.5 friendly:px-3 friendly:py-2")}>
           <LogSearchBar
             compact
             autoFocus
@@ -206,7 +213,7 @@ export function ServerTile({
             const el = e.currentTarget
             stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
           }}
-          className="log-lines log-compact relative min-h-0 flex-1 overflow-auto bg-muted/40 px-2.5 py-2 pr-8 font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap terminal:bg-terminal studio:bg-surface-sunken studio:leading-[1.6] studio:text-foreground/90"
+          className="log-lines log-compact relative min-h-0 flex-1 overflow-auto bg-muted/40 px-2.5 py-2 pr-8 font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap terminal:bg-terminal studio:bg-surface-sunken studio:leading-[1.6] studio:text-foreground/90 friendly:bg-log friendly:py-2 friendly:pr-8 friendly:pl-1.5 friendly:text-[11.5px] friendly:leading-[1.65] friendly:text-log-foreground"
         >
           <LineCopy container={logRef} lines={lines} />
           {lines.length ? (

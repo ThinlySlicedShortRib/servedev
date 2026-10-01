@@ -71,7 +71,7 @@ export function AccountsSheet() {
         <SheetTrigger render={<Button variant="outline" size="sm" className="relative" />}>
           <KeyRoundIcon data-icon="inline-start" />
           <span className="max-sm:hidden">Accounts</span>
-          {warnings > 0 && <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-500 terminal:rounded-[1px] terminal:bg-warning studio:bg-warning studio:ring-2 studio:ring-background" aria-label={`${warnings} warnings`} />}
+          {warnings > 0 && <span className="absolute -top-1 -right-1 size-2 rounded-full bg-amber-500 terminal:rounded-[1px] terminal:bg-warning studio:bg-warning friendly:bg-warning studio:ring-2 studio:ring-background" aria-label={`${warnings} warnings`} />}
         </SheetTrigger>
       </Hint>
       <SheetContent className="gap-0 sm:max-w-md">

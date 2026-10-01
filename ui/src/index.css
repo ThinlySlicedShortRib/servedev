@@ -4,8 +4,10 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/nunito";
 @import "./styles/terminal.css";
 @import "./styles/studio.css";
+@import "./styles/friendly.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -38,6 +40,21 @@
     --color-surface-sunken: var(--surface-sunken);
     --color-tooltip: var(--tooltip);
     --color-tooltip-foreground: var(--tooltip-foreground);
+    /* Friendly's extras: status pills/dots and its log panel. */
+    --color-log: var(--log);
+    --color-log-foreground: var(--log-foreground);
+    --color-status-running: var(--status-running);
+    --color-status-running-foreground: var(--status-running-foreground);
+    --color-status-running-soft: var(--status-running-soft);
+    --color-status-starting: var(--status-starting);
+    --color-status-starting-foreground: var(--status-starting-foreground);
+    --color-status-starting-soft: var(--status-starting-soft);
+    --color-status-crashed: var(--status-crashed);
+    --color-status-crashed-foreground: var(--status-crashed-foreground);
+    --color-status-crashed-soft: var(--status-crashed-soft);
+    --color-status-stopped: var(--status-stopped);
+    --color-status-stopped-foreground: var(--status-stopped-foreground);
+    --color-status-stopped-soft: var(--status-stopped-soft);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

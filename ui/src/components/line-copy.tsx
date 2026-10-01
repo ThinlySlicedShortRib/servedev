@@ -115,7 +115,7 @@ export function LineCopy({
         // Shows which lines belong to the entry that will be copied.
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-x-0 rounded-sm bg-primary/5 ring-1 ring-primary/10 studio:rounded-none studio:bg-primary/[0.05] studio:ring-0 studio:shadow-[inset_2px_0_0_color-mix(in_oklch,var(--primary)_55%,transparent)] studio:animate-in studio:fade-in-0 studio:duration-150"
+          className="pointer-events-none absolute inset-x-0 rounded-sm bg-primary/5 ring-1 ring-primary/10 friendly:rounded-lg friendly:bg-primary/6 friendly:ring-primary/15 studio:rounded-none studio:bg-primary/[0.05] studio:ring-0 studio:shadow-[inset_2px_0_0_color-mix(in_oklch,var(--primary)_55%,transparent)] studio:animate-in studio:fade-in-0 studio:duration-150"
           style={{ top: hover.top, height: hover.height }}
         />
       )}
@@ -138,7 +138,7 @@ export function LineCopy({
                 ? `Copy log entry (lines ${hover.start + 1}–${hover.end + 1})`
                 : `Copy line ${hover.start + 1}`
             }
-            className="pointer-events-auto sticky top-1 mt-px flex size-5 items-center justify-center rounded-sm border bg-background text-muted-foreground shadow-xs hover:text-foreground studio:rounded-[5px] studio:bg-card studio:shadow-sm studio:transition-colors studio:animate-in studio:fade-in-0 studio:zoom-in-90 studio:duration-150 studio:hover:border-ring/50"
+            className="pointer-events-auto sticky top-1 mt-px flex size-5 items-center justify-center rounded-sm border bg-background text-muted-foreground shadow-xs hover:text-foreground friendly:size-6 friendly:rounded-lg friendly:bg-card friendly:shadow-sm friendly:transition-colors friendly:hover:border-primary/40 friendly:hover:text-primary studio:rounded-[5px] studio:bg-card studio:shadow-sm studio:transition-colors studio:animate-in studio:fade-in-0 studio:zoom-in-90 studio:duration-150 studio:hover:border-ring/50"
           >
             <CopyIcon className="size-3" />
           </button>

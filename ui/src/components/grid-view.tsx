@@ -5,6 +5,7 @@ import "react-grid-layout/css/styles.css"
 
 import { DRAG_HANDLE, NO_DRAG, ServerTile } from "@/components/server-tile"
 import { useStyleId } from "@/components/style-provider"
+import { EmptyGridArt } from "@/components/friendly-decor"
 import { GridIllustration } from "@/components/studio-decor"
 import { useMultiLogStream } from "@/hooks/use-multi-log"
 import { TILE } from "@/hooks/use-custom-grid"
@@ -51,6 +52,7 @@ export function GridView({
   const styleId = useStyleId()
   const terminal = styleId === "terminal"
   const studio = styleId === "studio"
+  const friendly = styleId === "friendly"
   const shown = React.useMemo(() => items.filter((it) => servers.has(it.i)), [items, servers])
   // Stable across renders (logs stream in constantly); the grid compares it to its own state.
   const layout = React.useMemo(() => shown.map((it) => ({ ...it, minW: TILE.minW, minH: TILE.minH })), [shown])
@@ -82,8 +84,8 @@ export function GridView({
           {"┌────────┬────────┐\n│        │        │\n│ $ _    │        │\n├────────┼────────┤\n│        │        │\n│        │        │\n└────────┴────────┘"}
         </pre>
       )}
-      {studio ? <GridIllustration className="mb-2" /> : <LayoutGridIcon className="size-6 text-muted-foreground terminal:size-4 terminal:text-primary" />}
-      <p className="phosphor-glow text-sm font-medium terminal:font-semibold studio:tracking-tight">
+      {studio ? <GridIllustration className="mb-2" /> : friendly ? <EmptyGridArt className="mb-2 friendly-rise" /> : <LayoutGridIcon className="size-6 text-muted-foreground terminal:size-4 terminal:text-primary" />}
+      <p className="phosphor-glow text-sm font-medium terminal:font-semibold studio:tracking-tight friendly:text-lg friendly:font-extrabold friendly:tracking-tight">
         Build your grid
         {terminal && <span aria-hidden className="term-cursor ml-1" />}
       </p>

@@ -186,7 +186,7 @@ function CatalogList({
                       )}
                       {e.spec.tested === false && (
                         <Hint label="Its commands were written from the CLI's docs but haven't been run against it yet. Test it, and please report what doesn't work.">
-                          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400 terminal:border-warning/50 terminal:text-warning terminal:dark:text-warning studio:border-warning/50 studio:text-warning-foreground studio:dark:text-warning-foreground">
+                          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400 terminal:border-warning/50 terminal:text-warning terminal:dark:text-warning studio:border-warning/50 studio:text-warning-foreground studio:dark:text-warning-foreground friendly:border-warning/50 friendly:text-warning-foreground friendly:dark:text-warning-foreground">
                             untested
                           </Badge>
                         </Hint>

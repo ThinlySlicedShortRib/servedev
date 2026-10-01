@@ -88,9 +88,9 @@ export function BulkActions({ servers, scope, profileId }: { servers: Server[]; 
                 : "Each server and every process it started is shut down. Logs are kept, and you can start them again any time."}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <ul className="max-h-60 overflow-auto rounded-lg border py-1 text-sm">
+          <ul className="max-h-60 overflow-auto rounded-lg border py-1 text-sm friendly:rounded-xl friendly:bg-card friendly:py-1.5">
             {targets.map((s) => (
-              <li key={s.id} className="flex items-center gap-2 px-3 py-1">
+              <li key={s.id} className="flex items-center gap-2 px-3 py-1 friendly:px-3.5 friendly:py-1.5">
                 <StatusDot status={s.status} />
                 <span className="font-medium">{s.name}</span>
                 <TruncatedText text={s.project} className="text-muted-foreground" />

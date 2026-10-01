@@ -16,7 +16,9 @@ import { toast } from "sonner"
 
 import { AccountTag } from "@/components/account-tag"
 import { StatusDot, statusTagClass } from "@/components/status-dot"
+import { ProjectAvatar } from "@/components/friendly-decor"
 import { useStyleId } from "@/components/style-provider"
+import { useStatusFx } from "@/hooks/use-status-fx"
 import { cn } from "@/lib/utils"
 import { useStartProfile } from "@/hooks/use-accounts"
 import { BranchTag } from "@/components/branch-tag"
@@ -58,6 +60,9 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
   const styleId = useStyleId()
   const terminal = styleId === "terminal"
   const studio = styleId === "studio"
+  const friendly = styleId === "friendly"
+  // Friendly style: the status pill pops when the server becomes ready and shakes once when it crashes.
+  const statusFx = useStatusFx(s?.status, friendly)
   const [tab, setTab] = React.useState<"logs" | "processes" | "preview">("logs")
   const [editingHost, setEditingHost] = React.useState(false)
   const [savingConfig, setSavingConfig] = React.useState(false)
@@ -134,15 +139,17 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex flex-col gap-4 p-4 md:p-6">
+      <div className="flex flex-col gap-4 p-4 md:p-6 friendly:@container/detail friendly:p-5 friendly:md:px-7 friendly:md:pt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold terminal:flex terminal:items-baseline terminal:gap-2 terminal:text-lg studio:text-lg studio:tracking-tight">
+          <div className="flex items-center gap-3 friendly:min-w-0">
+            {friendly && <ProjectAvatar name={entry.project} className="size-10 rounded-xl text-base shadow-xs" />}
+            <h1 className="text-xl font-semibold terminal:flex terminal:items-baseline terminal:gap-2 terminal:text-lg studio:text-lg studio:tracking-tight friendly:text-2xl friendly:font-extrabold friendly:tracking-tight">
               <span aria-hidden className="hidden text-primary select-none terminal:inline">❯</span>
               {entry.name}
             </h1>
-            <Badge variant={statusVariant} className={cn(statusTagClass(s?.status), "studio:gap-1.5 studio:font-normal")}>
+            <Badge variant={statusVariant} className={cn(statusTagClass(s?.status), "studio:gap-1.5 studio:font-normal", statusFx === "crash" && "friendly-shake", statusFx === "ready" && "friendly-pop")}>
               {studio && <StatusDot status={entry.status} className="size-1.5" />}
+              {friendly && <StatusDot status={s?.status ?? "idle"} />}
               {terminal && s && (s.status === "starting" || s.status === "stopping") && <StatusDot status={s.status} />}
               {s ? statusLabel(s) : "not started"}
             </Badge>
@@ -254,7 +261,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           </div>
         </div>
 
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm studio:gap-x-8 studio:gap-y-2 studio:leading-5">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm studio:gap-x-8 studio:gap-y-2 studio:leading-5 friendly-rise friendly:items-baseline friendly:gap-y-2 friendly:rounded-2xl friendly:border friendly:bg-card friendly:px-5 friendly:py-3.5 friendly:shadow-xs friendly:@2xl/detail:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] friendly:@4xl/detail:gap-x-8 friendly:[&_dt]:text-[13px] friendly:[&_dt]:font-semibold">
           {s && (s.url || s.hostname) && (
             <>
               <dt className="text-muted-foreground">URL</dt>
@@ -332,7 +339,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               <dd className="flex min-w-0 flex-wrap gap-1.5">
                 {s.vars.map((v) => (
                   <Hint key={v.name} label={`${v.name} is set for this server on purpose${v.secret ? " (looks like a secret)" : ""}. Everything else comes from your login shell at each start.`}>
-                    <span className="inline-flex max-w-full items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-xs studio:bg-muted/40 studio:text-[11px]">
+                    <span className="inline-flex max-w-full items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-xs studio:bg-muted/40 studio:text-[11px] friendly:rounded-full friendly:bg-muted/60 friendly:px-2.5">
                       {v.secret && <LockIcon className="size-3 shrink-0 text-muted-foreground" aria-label="secret" />}
                       <span className="truncate">
                         {v.name}=<span className="text-muted-foreground">{v.preview}</span>
@@ -417,7 +424,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
         </dl>
 
         {s && !active && s.status === "crashed" && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" className="friendly-rise">
             <TriangleAlertIcon />
             <AlertTitle>
               {statusLabel(s)[0].toUpperCase() + statusLabel(s).slice(1)}
@@ -441,9 +448,9 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as "logs" | "processes" | "preview")}
-        className="flex min-h-0 flex-1 flex-col gap-0 border-t"
+        className="flex min-h-0 flex-1 flex-col gap-0 border-t friendly:border-t-0"
       >
-        <div className="px-4 pt-2 md:px-6">
+        <div className="px-4 pt-2 md:px-6 friendly:px-5 friendly:pt-1 friendly:md:px-7">
           <TabsList>
             <Hint label="Live output, run history and search">
               <TabsTrigger value="logs">Logs</TabsTrigger>
@@ -452,7 +459,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               <TabsTrigger value="processes" disabled={!s}>
                 Processes
                 {active && groups && (
-                  <span className="text-muted-foreground tabular-nums studio:rounded-[4px] studio:bg-foreground/[0.06] studio:px-1 studio:text-[11px] studio:leading-4">
+                  <span className="text-muted-foreground tabular-nums studio:rounded-[4px] studio:bg-foreground/[0.06] studio:px-1 studio:text-[11px] studio:leading-4 friendly:rounded-full friendly:bg-muted-foreground/12 friendly:px-1.5 friendly:text-xs friendly:leading-5">
                     {processCount}
                     {groups.length > 1 ? ` in ${groups.length} groups` : ""}
                   </span>

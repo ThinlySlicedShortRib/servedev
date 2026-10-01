@@ -37,7 +37,9 @@ function useFrameCheck(url: string | undefined): FrameCheck | null {
 export function AppPreview({ server: s }: { server: Server }) {
   const active = ACTIVE.includes(s.status)
   const href = openUrl(s)
-  const studio = useStyleId() === "studio"
+  const styleId = useStyleId()
+  const studio = styleId === "studio"
+  const friendly = styleId === "friendly"
   const frame = useFrameCheck(active ? href : undefined)
   const [reloadKey, setReloadKey] = React.useState(0)
 
@@ -81,8 +83,8 @@ export function AppPreview({ server: s }: { server: Server }) {
     )
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground md:px-6 studio:bg-surface-sunken">
+    <div className="flex min-h-0 flex-1 flex-col friendly-rise friendly:m-3 friendly:overflow-hidden friendly:rounded-2xl friendly:border friendly:bg-card friendly:shadow-sm friendly:md:mx-5 friendly:md:mb-5">
+      <div className="flex items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground md:px-6 studio:bg-surface-sunken friendly:bg-muted/60 friendly:px-3 friendly:md:px-3">
         {/* Studio style: a hint of browser chrome around the address. */}
         {studio && (
           <span aria-hidden className="mr-1 flex shrink-0 gap-1.5">
@@ -91,7 +93,15 @@ export function AppPreview({ server: s }: { server: Server }) {
             <span className="size-2 rounded-full bg-foreground/10" />
           </span>
         )}
-        <TruncatedText text={href} className="font-mono studio:min-w-0 studio:rounded-md studio:border studio:bg-card studio:px-2 studio:py-0.5 studio:text-[11px] studio:shadow-xs" />
+        {/* Friendly style: a little browser window, traffic lights and an address pill. */}
+        {friendly && (
+          <span aria-hidden className="mr-1 flex shrink-0 gap-1.5">
+            <span className="size-2.5 rounded-full bg-status-crashed/70" />
+            <span className="size-2.5 rounded-full bg-status-starting/80" />
+            <span className="size-2.5 rounded-full bg-status-running/70" />
+          </span>
+        )}
+        <TruncatedText text={href} className="font-mono friendly:min-w-0 friendly:rounded-full friendly:border friendly:bg-card friendly:px-3 friendly:py-1 friendly:shadow-xs studio:min-w-0 studio:rounded-md studio:border studio:bg-card studio:px-2 studio:py-0.5 studio:text-[11px] studio:shadow-xs" />
         <Hint label="Reload the preview (the server keeps running)">
           <Button
             variant="ghost"

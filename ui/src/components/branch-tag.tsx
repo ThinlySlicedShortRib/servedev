@@ -8,7 +8,7 @@ export function BranchTag({ branch, className }: { branch: string; className?: s
   return (
     <span
       className={cn(
-        "inline-flex min-w-0 items-center gap-1 rounded-sm border px-1 py-px font-mono text-[10px] leading-none font-normal text-muted-foreground",
+        "inline-flex min-w-0 items-center gap-1 rounded-sm border px-1 py-px font-mono text-[10px] leading-none font-normal text-muted-foreground friendly:rounded-full friendly:bg-card/60 friendly:px-1.5 friendly:py-0.5",
         className
       )}
     >

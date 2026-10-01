@@ -72,9 +72,9 @@ export function HungServers({ servers, onCleared }: { servers: ExternalServer[];
               stopped; your other servers and the tools that started them aren't touched.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <ul className="max-h-72 overflow-auto rounded-lg border py-1 text-sm">
+          <ul className="max-h-72 overflow-auto rounded-lg border py-1 text-sm friendly:rounded-xl friendly:bg-card friendly:py-1.5">
             {listed.map((s) => (
-              <li key={s.id} className="flex items-baseline gap-2 px-3 py-1">
+              <li key={s.id} className="flex items-baseline gap-2 px-3 py-1 friendly:px-3.5 friendly:py-1.5">
                 <span className="font-medium">{s.suggestedName}</span>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground" title={s.project}>
                   {s.project}

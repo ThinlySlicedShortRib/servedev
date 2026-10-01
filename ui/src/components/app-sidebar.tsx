@@ -5,6 +5,7 @@ import { StatusDot } from "@/components/status-dot"
 import { useStyleId } from "@/components/style-provider"
 import { LogoMark } from "@/components/terminal-decor"
 import { NoMatchIllustration, StudioLogoMark } from "@/components/studio-decor"
+import { FriendlyLogoMark, ProjectAvatar } from "@/components/friendly-decor"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -89,6 +90,7 @@ export function AppSidebar({
   const styleId = useStyleId()
   const terminal = styleId === "terminal"
   const studio = styleId === "studio"
+  const friendly = styleId === "friendly"
 
   const all = React.useMemo(() => [...pinned, ...groups.flatMap(([, es]) => es)], [groups, pinned])
   const counts = React.useMemo(() => {
@@ -173,6 +175,23 @@ export function AppSidebar({
                 {connected === null ? "Connecting…" : connected ? "Live" : "Disconnected"}
               </span>
             </>
+          ) : friendly ? (
+            <>
+              <FriendlyLogoMark className="transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-data-[collapsible=icon]:hidden hover:-rotate-6 hover:scale-105" />
+              <span className="text-[17px] font-extrabold tracking-tight group-data-[collapsible=icon]:hidden">servedev</span>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold transition-colors duration-500 group-data-[collapsible=icon]:hidden",
+                  connected === null && "bg-status-stopped-soft text-status-stopped-foreground",
+                  connected === true && "bg-status-running-soft text-status-running-foreground",
+                  connected === false && "bg-status-crashed-soft text-status-crashed-foreground"
+                )}
+              >
+                {/* A calm heartbeat while live, a pulse while (re)connecting. */}
+                <span aria-hidden className={cn("size-1.5 rounded-full bg-current", connected === true && "friendly-live", connected === null && "friendly-pulse")} />
+                {connected === null ? "Connecting…" : connected ? "Live" : "Disconnected"}
+              </span>
+            </>
           ) : (
             <>
               <span className="font-semibold group-data-[collapsible=icon]:hidden">servedev</span>
@@ -183,7 +202,7 @@ export function AppSidebar({
           )}
           <Tooltip>
             <TooltipTrigger
-              render={<Button variant="ghost" size="icon-sm" className="ml-auto group-data-[collapsible=icon]:ml-0" onClick={onNew} aria-label="New server" />}
+              render={<Button variant="ghost" size="icon-sm" className="ml-auto group-data-[collapsible=icon]:ml-0 friendly:bg-primary/10 friendly:text-primary friendly:hover:bg-primary/20 friendly:hover:text-primary friendly:dark:hover:bg-primary/20" onClick={onNew} aria-label="New server" />}
             >
               <PlusIcon />
             </TooltipTrigger>
@@ -234,10 +253,10 @@ export function AppSidebar({
         >
           {FILTERS.map((f) => (
             <Hint key={f.value} label={`${f.hint} (${counts[f.value]})`}>
-              <ToggleGroupItem value={f.value} className="flex-1 px-1.5 text-xs terminal:flex-auto terminal:gap-1 terminal:px-1.5 terminal:text-[11px] studio:min-w-0 studio:flex-auto studio:gap-1 studio:px-1.5 studio:text-[11.5px]">
+              <ToggleGroupItem value={f.value} className="flex-1 px-1.5 text-xs terminal:flex-auto terminal:gap-1 terminal:px-1.5 terminal:text-[11px] studio:min-w-0 studio:flex-auto studio:gap-1 studio:px-1.5 studio:text-[11.5px] friendly:flex-auto friendly:gap-1">
                 {f.label}
                 {f.value === "crashed" && counts.crashed > 0 && (
-                  <span className="text-destructive tabular-nums studio:-mr-0.5 studio:inline-flex studio:h-4 studio:min-w-4 studio:items-center studio:justify-center studio:rounded-full studio:bg-destructive studio:px-1 studio:text-[10px] studio:leading-none studio:font-semibold studio:text-white studio:animate-in studio:zoom-in-50 studio:duration-300 studio:dark:text-[oklch(0.18_0.02_25)]">
+                  <span className="text-destructive tabular-nums studio:-mr-0.5 studio:inline-flex studio:h-4 studio:min-w-4 studio:items-center studio:justify-center studio:rounded-full studio:bg-destructive studio:px-1 studio:text-[10px] studio:leading-none studio:font-semibold studio:text-white studio:animate-in studio:zoom-in-50 studio:duration-300 studio:dark:text-[oklch(0.18_0.02_25)] friendly:rounded-full friendly:bg-status-crashed-soft friendly:px-1.5 friendly:text-[11px] friendly:leading-4 friendly:font-bold friendly:text-status-crashed-foreground">
                     {counts.crashed}
                   </span>
                 )}
@@ -260,6 +279,21 @@ export function AppSidebar({
                   <span className="studio-skeleton h-2 w-1/3 rounded-full opacity-70" />
                 </span>
               </span>
+            ))}
+          </div>
+        )}
+        {/* Friendly style: warm shimmering placeholders while the first list loads. */}
+        {friendly && connected === null && visible.length === 0 && (
+          <div aria-hidden className="flex flex-col gap-1 p-3 group-data-[collapsible=icon]:hidden">
+            <div className="friendly-shimmer mb-2 ml-2 h-3 w-20 rounded-full" />
+            {[0.9, 0.7, 0.8, 0.6].map((w, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-xl px-2 py-2.5">
+                <div className="friendly-shimmer size-2.5 rounded-full" />
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <div className="friendly-shimmer h-3 rounded-full" style={{ width: `${w * 100}%` }} />
+                  <div className="friendly-shimmer h-2.5 w-1/2 rounded-full" />
+                </div>
+              </div>
             ))}
           </div>
         )}
@@ -296,12 +330,13 @@ export function AppSidebar({
             <SidebarGroupLabel className="pr-7 group-data-[collapsible=icon]:pointer-events-none">
               {project === PINNED ? (
                 <>
-                  <PinIcon className="mr-1.5 size-3" />
+                  <PinIcon className="mr-1.5 size-3 friendly:size-3.5 friendly:text-primary" />
                   Pinned
                 </>
               ) : (
                 // All servers in a project share its folder, so they share the branch.
                 <span className="flex min-w-0 items-center gap-1.5">
+                  {friendly && <ProjectAvatar name={project} />}
                   <TruncatedText text={project} />
                   {entries.map(branchOf).find(Boolean) && <BranchTag branch={entries.map(branchOf).find(Boolean)!} className="shrink" />}
                 </span>
@@ -309,7 +344,7 @@ export function AppSidebar({
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {entries.map((e) => {
+                {entries.map((e, i) => {
                   const s = e.server
                   const x = e.external
                   const state = x
@@ -325,7 +360,7 @@ export function AppSidebar({
                   const sub = project === PINNED ? `${e.project}, ${state}` : state
                   const port = s && portOf(s)
                   return (
-                    <SidebarMenuItem key={e.key} className="tree-row terminal:pl-5 terminal:group-data-[collapsible=icon]:pl-0 studio-row-in">
+                    <SidebarMenuItem key={e.key} className="tree-row terminal:pl-5 terminal:group-data-[collapsible=icon]:pl-0 studio-row-in friendly-rise" style={friendly ? { animationDelay: `${Math.min(i, 10) * 30}ms` } : undefined}>
                       <SidebarMenuButton
                         draggable={!!grid && !!s && !grid.ids.has(s.id)}
                         onDragStart={(ev) => {
@@ -348,13 +383,13 @@ export function AppSidebar({
                         <span className="flex size-4 shrink-0 items-center justify-center group-data-[collapsible=icon]:size-8">
                           {x ? (
                             // Hollow: running, but not managed by servedev.
-                            <span aria-hidden className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-emerald-500 terminal:rounded-[1px] terminal:border-success studio:border-success" />
+                            <span aria-hidden className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-emerald-500 terminal:rounded-[1px] terminal:border-success studio:border-success friendly:size-2.5 friendly:border-2 friendly:border-status-running" />
                           ) : (
                             <StatusDot status={e.status} />
                           )}
                         </span>
                         <div className="grid flex-1 text-left leading-tight">
-                          <TruncatedText text={e.name} className={cn("font-medium", studio && e.status === "crashed" && "text-destructive")} side="right" />
+                          <TruncatedText text={e.name} className={cn("font-medium friendly:font-semibold", studio && e.status === "crashed" && "text-destructive")} side="right" />
                           <TruncatedText text={sub} className="text-xs text-muted-foreground studio:tabular-nums" side="right" />
                           {project === PINNED && branchOf(e) && (
                             <span className="mt-0.5 flex">
@@ -386,7 +421,7 @@ export function AppSidebar({
                             aria-label={grid.ids.has(s.id) ? `Remove ${e.name} from the grid` : `Add ${e.name} to the grid`}
                             className="top-3"
                           >
-                            {grid.ids.has(s.id) ? <CheckIcon className="text-emerald-600 dark:text-emerald-400 terminal:text-success terminal:dark:text-success studio:text-success-foreground studio:dark:text-success-foreground" /> : <PlusIcon />}
+                            {grid.ids.has(s.id) ? <CheckIcon className="text-emerald-600 dark:text-emerald-400 terminal:text-success terminal:dark:text-success friendly:text-status-running-foreground friendly:dark:text-status-running-foreground studio:text-success-foreground studio:dark:text-success-foreground" /> : <PlusIcon />}
                           </SidebarMenuAction>
                         </Hint>
                       ) : x?.url ? (
@@ -394,7 +429,7 @@ export function AppSidebar({
                           <SidebarMenuAction
                             render={<a href={x.url} target="_blank" rel="noopener" />}
                             aria-label={`Open ${e.name} in a new tab`}
-                            className="top-2.5 aspect-auto h-6 w-auto gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3 studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground"
+                            className="top-2.5 aspect-auto h-6 w-auto gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3 studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground friendly:top-3 friendly:rounded-full friendly:bg-sidebar-accent/70 friendly:px-2 friendly:text-[11px] friendly:ring-1 friendly:ring-transparent friendly:transition-colors friendly:hover:bg-primary/12 friendly:hover:text-primary friendly:hover:ring-primary/25"
                           >
                             <span>{x.url.split(":").pop()}</span>
                             <ExternalLinkIcon />
@@ -406,7 +441,7 @@ export function AppSidebar({
                           <SidebarMenuAction
                             render={<a href={openUrl(s)} target="_blank" rel="noopener" />}
                             aria-label={`Open ${e.name} in a new tab`}
-                            className="top-2.5 aspect-auto h-6 w-auto max-w-32 gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3 studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground"
+                            className="top-2.5 aspect-auto h-6 w-auto max-w-32 gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3 studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground friendly:top-3 friendly:rounded-full friendly:bg-sidebar-accent/70 friendly:px-2 friendly:text-[11px] friendly:ring-1 friendly:ring-transparent friendly:transition-colors friendly:hover:bg-primary/12 friendly:hover:text-primary friendly:hover:ring-primary/25"
                           >
                             <span className="truncate">{s?.customUrl ? s.hostname : port}</span>
                             <ExternalLinkIcon />

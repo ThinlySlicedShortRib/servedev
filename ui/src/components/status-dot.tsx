@@ -1,12 +1,16 @@
 /* eslint-disable react-refresh/only-export-components */
+import * as React from "react"
+
 import { cn } from "@/lib/utils"
 import type { Status } from "@/lib/api"
 import { useStyleId } from "@/components/style-provider"
+import { useStatusFx } from "@/hooks/use-status-fx"
 
 export function StatusDot({ status, className }: { status: Status | "idle"; className?: string }) {
   const style = useStyleId()
   if (style === "terminal") return <TerminalStatusGlyph status={status} className={className} />
   if (style === "studio") return <StudioStatusDot status={status} className={className} />
+  if (style === "friendly") return <FriendlyStatusDot status={status} className={className} />
   return (
     <span
       aria-hidden
@@ -75,7 +79,13 @@ export function statusTagClass(status: Status | "idle" | undefined) {
     status === "running" && "terminal:border-success/60 terminal:bg-success/10 terminal:text-success",
     (status === "starting" || status === "stopping") && "terminal:border-warning/60 terminal:bg-warning/10 terminal:text-warning",
     status === "crashed" && "terminal:border-destructive terminal:bg-destructive terminal:text-background terminal:dark:bg-destructive",
-    (status === "stopped" || status === "exited" || status === "idle" || !status) && "terminal:border-border terminal:bg-transparent terminal:text-muted-foreground"
+    (status === "stopped" || status === "exited" || status === "idle" || !status) && "terminal:border-border terminal:bg-transparent terminal:text-muted-foreground",
+    // Friendly: a soft colored pill (with its dot inside; see server-detail.tsx).
+    status === "running" && "friendly:border-status-running/25 friendly:bg-status-running-soft friendly:text-status-running-foreground friendly:dark:bg-status-running-soft",
+    (status === "starting" || status === "stopping") && "friendly:border-status-starting/30 friendly:bg-status-starting-soft friendly:text-status-starting-foreground friendly:dark:bg-status-starting-soft",
+    status === "crashed" && "friendly:border-status-crashed/25 friendly:bg-status-crashed-soft friendly:text-status-crashed-foreground friendly:dark:bg-status-crashed-soft",
+    (status === "stopped" || status === "exited" || status === "idle" || !status) &&
+      "friendly:border-status-stopped/30 friendly:bg-status-stopped-soft friendly:text-status-stopped-foreground friendly:dark:bg-status-stopped-soft"
   )
 }
 
@@ -98,5 +108,63 @@ function StudioStatusDot({ status, className }: { status: Status | "idle"; class
         className
       )}
     />
+  )
+}
+
+const SPARKLES = [
+  { r: 0, c: "bg-status-running" },
+  { r: 72, c: "bg-primary" },
+  { r: 144, c: "bg-status-starting" },
+  { r: 216, c: "bg-status-running" },
+  { r: 288, c: "bg-primary" },
+]
+
+/**
+ * Friendly style: status by shape as well as color: running = solid circle with a soft halo,
+ * starting/stopping = half-filled breathing circle, crashed = diamond, stopped = rounded square,
+ * not started = dashed ring. A change seen on screen plays once: a check and a few sparkles when
+ * it becomes ready, a fading red glow when it crashes (friendly.css).
+ */
+function FriendlyStatusDot({ status, className }: { status: Status | "idle"; className?: string }) {
+  const fx = useStatusFx(status)
+  return (
+    <span aria-hidden className={cn("relative inline-flex size-2.5 shrink-0 items-center justify-center", className)}>
+      <span
+        className={cn(
+          "inline-block size-2.5 shrink-0 rounded-full transition-[background-color,box-shadow] duration-500",
+          status === "running" && "bg-status-running ring-[3px] ring-status-running/20",
+          (status === "starting" || status === "stopping") &&
+            "friendly-breathe border-[1.5px] border-status-starting bg-[image:conic-gradient(var(--status-starting)_0_50%,transparent_0)]",
+          status === "crashed" && "size-2 rotate-45 rounded-[2px] bg-status-crashed ring-[3px] ring-status-crashed/15",
+          status === "crashed" && fx === "crash" && "friendly-crash-glow",
+          (status === "stopped" || status === "exited") && "size-2 rounded-[3px] bg-status-stopped",
+          status === "idle" && "border-[1.5px] border-dashed border-status-stopped"
+        )}
+      />
+      {fx === "ready" && status === "running" && (
+        <span className="pointer-events-none absolute inset-0">
+          <span className="friendly-ready-ring absolute inset-0 rounded-full bg-status-running/50" />
+          {SPARKLES.map((p) => (
+            <span
+              key={p.r}
+              className={cn("friendly-sparkle absolute top-1/2 left-1/2 -mt-[2px] -ml-[2px] size-1 rounded-full", p.c)}
+              style={{ "--r": `${p.r}deg` } as React.CSSProperties}
+            />
+          ))}
+          <svg viewBox="0 0 16 16" className="friendly-check-badge absolute top-1/2 left-1/2 size-3.5">
+            <circle cx="8" cy="8" r="8" className="fill-status-running" />
+            <path
+              d="M4.6 8.3 7 10.6l4.4-4.9"
+              fill="none"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray="24"
+              className="friendly-draw stroke-white"
+            />
+          </svg>
+        </span>
+      )}
+    </span>
   )
 }

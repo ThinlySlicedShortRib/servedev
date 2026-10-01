@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { Hint, TruncatedText } from "@/components/hint"
 import { StatusDot } from "@/components/status-dot"
+import { useStyleId } from "@/components/style-provider"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -33,6 +34,7 @@ export function NewServerDialog({
   onOpenChange: (open: boolean) => void
   onStarted: (id: string) => void
 }) {
+  const friendly = useStyleId() === "friendly"
   const [dir, setDir] = React.useState("")
   const [info, setInfo] = React.useState<Inspection | null>(null)
   const [inspecting, setInspecting] = React.useState(false)
@@ -168,6 +170,11 @@ export function NewServerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
+          {friendly && (
+            <span aria-hidden className="mb-2 flex size-11 items-center justify-center rounded-2xl bg-accent text-accent-foreground shadow-xs ring-1 ring-primary/10 [&>svg]:size-5">
+              <FolderPlusIcon />
+            </span>
+          )}
           <DialogTitle>New dev server</DialogTitle>
           <DialogDescription>Choose a project folder. servedev works out how to start it, and you can adjust that before it runs.</DialogDescription>
         </DialogHeader>

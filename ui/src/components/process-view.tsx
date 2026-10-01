@@ -42,16 +42,16 @@ function explain(groups: ProcessGroup[]): string {
 
 export function ProcessView({ groups, running }: { groups: ProcessGroup[] | null; running: boolean }) {
   const terminal = useStyleId() === "terminal"
-  if (!running) return <p className="px-4 py-6 text-sm text-muted-foreground md:px-6">No processes. The server isn't running.</p>
-  if (!groups) return <p className="px-4 py-6 text-sm text-muted-foreground md:px-6">Loading processes…</p>
+  if (!running) return <p className="px-4 py-6 text-sm text-muted-foreground md:px-6 friendly:px-5 friendly:md:px-7">No processes. The server isn't running.</p>
+  if (!groups) return <p className="px-4 py-6 text-sm text-muted-foreground md:px-6 friendly:px-5 friendly:md:px-7">Loading processes…</p>
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="flex flex-col gap-4 px-4 py-4 md:px-6">
+      <div className="flex flex-col gap-4 px-4 py-4 md:px-6 friendly:px-5 friendly:md:px-7">
         <p className="max-w-prose text-sm text-muted-foreground">{explain(groups)}</p>
         {groups.map((g) => (
-          <section key={g.pgid} className="rounded-lg border studio:overflow-hidden studio:bg-card" aria-label={`Process group ${g.pgid}`}>
-            <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm studio:bg-muted/30">
+          <section key={g.pgid} className="rounded-lg border studio:overflow-hidden studio:bg-card friendly-rise friendly:overflow-hidden friendly:rounded-2xl friendly:bg-card friendly:shadow-xs" aria-label={`Process group ${g.pgid}`}>
+            <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm studio:bg-muted/30 friendly:bg-muted/50 friendly:px-4 friendly:py-2.5">
               <Badge variant={g.createdBy === "servedev" ? "secondary" : "outline"} className="font-mono">
                 group {g.pgid}
               </Badge>
@@ -60,9 +60,9 @@ export function ProcessView({ groups, running }: { groups: ProcessGroup[] | null
                 {g.processes.length} {g.processes.length === 1 ? "process" : "processes"}
               </span>
             </header>
-            <ul className="flex flex-col py-1">
+            <ul className="flex flex-col py-1 friendly:py-1.5">
               {g.processes.map((p) => (
-                <li key={p.pid} className="flex min-w-0 items-center gap-3 px-3 py-1 text-xs studio:transition-colors studio:hover:bg-muted/40">
+                <li key={p.pid} className="flex min-w-0 items-center gap-3 px-3 py-1 text-xs studio:transition-colors studio:hover:bg-muted/40 friendly:px-4 friendly:py-1.5">
                   <span className="w-12 shrink-0 font-mono text-muted-foreground tabular-nums">{p.pid}</span>
                   <span className="flex min-w-0 flex-1 font-mono" style={{ paddingLeft: `${p.depth * 16}px` }}>
                     {p.depth > 0 && <span className="shrink-0 text-muted-foreground">{terminal ? "└─" : "└"}&nbsp;</span>}
@@ -74,7 +74,7 @@ export function ProcessView({ groups, running }: { groups: ProcessGroup[] | null
                         href={`http://localhost:${port}`}
                         target="_blank"
                         rel="noopener"
-                        className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono tabular-nums hover:bg-muted studio:rounded-sm studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono tabular-nums hover:bg-muted studio:rounded-sm studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground friendly:rounded-full friendly:bg-card friendly:px-2 friendly:transition-colors friendly:hover:border-primary/40 friendly:hover:bg-accent friendly:hover:text-accent-foreground"
                       >
                         :{port}
                         <ExternalLinkIcon className="size-3" />
