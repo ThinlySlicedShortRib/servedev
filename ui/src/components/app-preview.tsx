@@ -2,6 +2,7 @@ import * as React from "react"
 import { ExternalLinkIcon, RotateCwIcon } from "@/components/icons"
 
 import { Hint, TruncatedText } from "@/components/hint"
+import { useStyleId } from "@/components/style-provider"
 import { Button } from "@/components/ui/button"
 import { ACTIVE, api, openUrl, type Server } from "@/lib/api"
 
@@ -36,6 +37,7 @@ function useFrameCheck(url: string | undefined): FrameCheck | null {
 export function AppPreview({ server: s }: { server: Server }) {
   const active = ACTIVE.includes(s.status)
   const href = openUrl(s)
+  const studio = useStyleId() === "studio"
   const frame = useFrameCheck(active ? href : undefined)
   const [reloadKey, setReloadKey] = React.useState(0)
 
@@ -80,8 +82,16 @@ export function AppPreview({ server: s }: { server: Server }) {
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground md:px-6">
-        <TruncatedText text={href} className="font-mono" />
+      <div className="flex items-center gap-2 border-b px-4 py-1.5 text-xs text-muted-foreground md:px-6 studio:bg-surface-sunken">
+        {/* Studio style: a hint of browser chrome around the address. */}
+        {studio && (
+          <span aria-hidden className="mr-1 flex shrink-0 gap-1.5">
+            <span className="size-2 rounded-full bg-foreground/10" />
+            <span className="size-2 rounded-full bg-foreground/10" />
+            <span className="size-2 rounded-full bg-foreground/10" />
+          </span>
+        )}
+        <TruncatedText text={href} className="font-mono studio:min-w-0 studio:rounded-md studio:border studio:bg-card studio:px-2 studio:py-0.5 studio:text-[11px] studio:shadow-xs" />
         <Hint label="Reload the preview (the server keeps running)">
           <Button
             variant="ghost"
@@ -109,7 +119,7 @@ export function AppPreview({ server: s }: { server: Server }) {
         key={`${href}#${reloadKey}`}
         src={href}
         title={`${s.name} preview`}
-        className="min-h-0 flex-1 bg-white"
+        className="min-h-0 flex-1 bg-white studio:animate-in studio:fade-in-0 studio:duration-300"
       />
     </div>
   )

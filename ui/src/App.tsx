@@ -6,6 +6,8 @@ import { AppearanceMenu } from "@/components/appearance-menu"
 import { AppSidebar } from "@/components/app-sidebar"
 import { ConfigIssues } from "@/components/config-issues"
 import { CrtPower } from "@/components/terminal-decor"
+import { ServersIllustration } from "@/components/studio-decor"
+import { useStyleId } from "@/components/style-provider"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Hint, TruncatedText } from "@/components/hint"
 import { BulkActions } from "@/components/bulk-actions"
@@ -68,6 +70,7 @@ export function App() {
   const { servers, configured, profiles, config, connected, layoutChange, accountsVersion } = useServedev()
   const accounts = useAccounts(accountsVersion)
   const now = useNow()
+  const studio = useStyleId() === "studio"
   const [profileId, setProfileId] = React.useState<string | null>(loadProfileId)
   const activeProfile = profiles.find((p) => p.id === profileId)
   // A profile saved before profiles moved to config files: its old numeric id maps to a new one.
@@ -242,11 +245,11 @@ export function App() {
         onNew={() => setCreating(true)}
       />
       <SidebarInset className="h-svh min-w-0 overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 terminal:bg-sidebar">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 terminal:bg-sidebar studio:bg-background/80 studio:backdrop-blur-sm">
           <Hint label="Shrink or expand the sidebar (⌘B)">
             <SidebarTrigger className="-ml-1" />
           </Hint>
-          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+          <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4 studio:mr-1.5" />
           <TruncatedText
             className="text-sm text-muted-foreground"
             text={view === "grid"
@@ -259,7 +262,7 @@ export function App() {
                 ? `${current.project} / ${current.name}`
                 : "Dev servers"}
           />
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 studio:gap-1.5">
             <AppearanceMenu />
             <AccountsSheet />
             {view === "grid" && activeProfile?.kind === "shared" && (
@@ -362,9 +365,15 @@ export function App() {
           connected && (
             <Empty>
               <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <ServerIcon />
-                </EmptyMedia>
+                {studio ? (
+                  <EmptyMedia>
+                    <ServersIllustration />
+                  </EmptyMedia>
+                ) : (
+                  <EmptyMedia variant="icon">
+                    <ServerIcon />
+                  </EmptyMedia>
+                )}
                 <EmptyTitle>No servers yet</EmptyTitle>
                 <EmptyDescription>
                   Pick a project folder to start one here, or run <code className="font-mono">servedev start</code> in a project. Agents can do the

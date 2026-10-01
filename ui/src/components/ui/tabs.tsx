@@ -2,6 +2,8 @@ import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
+import { useStyleId } from "@/components/style-provider"
+
 function Tabs({
   className,
   orientation = "horizontal",
@@ -38,15 +40,21 @@ const tabsListVariants = cva(
 function TabsList({
   className,
   variant = "default",
+  children,
   ...props
 }: TabsPrimitive.List.Props & VariantProps<typeof tabsListVariants>) {
+  const studio = useStyleId() === "studio"
   return (
     <TabsPrimitive.List
       data-slot="tabs-list"
       data-variant={variant}
       className={cn(tabsListVariants({ variant }), className)}
       {...props}
-    />
+    >
+      {children}
+      {/* Studio style: one thumb that glides to the active tab. */}
+      {studio && variant === "default" && <TabsPrimitive.Indicator data-slot="tabs-indicator" className="studio-tab-thumb" />}
+    </TabsPrimitive.List>
   )
 }
 

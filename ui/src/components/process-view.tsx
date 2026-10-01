@@ -50,19 +50,19 @@ export function ProcessView({ groups, running }: { groups: ProcessGroup[] | null
       <div className="flex flex-col gap-4 px-4 py-4 md:px-6">
         <p className="max-w-prose text-sm text-muted-foreground">{explain(groups)}</p>
         {groups.map((g) => (
-          <section key={g.pgid} className="rounded-lg border" aria-label={`Process group ${g.pgid}`}>
-            <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm">
+          <section key={g.pgid} className="rounded-lg border studio:overflow-hidden studio:bg-card" aria-label={`Process group ${g.pgid}`}>
+            <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm studio:bg-muted/30">
               <Badge variant={g.createdBy === "servedev" ? "secondary" : "outline"} className="font-mono">
                 group {g.pgid}
               </Badge>
               <span>{g.createdBy === "servedev" ? "Started by servedev" : `Created by ${g.createdBy}`}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="ml-auto text-xs text-muted-foreground studio:tabular-nums">
                 {g.processes.length} {g.processes.length === 1 ? "process" : "processes"}
               </span>
             </header>
             <ul className="flex flex-col py-1">
               {g.processes.map((p) => (
-                <li key={p.pid} className="flex min-w-0 items-center gap-3 px-3 py-1 text-xs">
+                <li key={p.pid} className="flex min-w-0 items-center gap-3 px-3 py-1 text-xs studio:transition-colors studio:hover:bg-muted/40">
                   <span className="w-12 shrink-0 font-mono text-muted-foreground tabular-nums">{p.pid}</span>
                   <span className="flex min-w-0 flex-1 font-mono" style={{ paddingLeft: `${p.depth * 16}px` }}>
                     {p.depth > 0 && <span className="shrink-0 text-muted-foreground">{terminal ? "└─" : "└"}&nbsp;</span>}
@@ -74,7 +74,7 @@ export function ProcessView({ groups, running }: { groups: ProcessGroup[] | null
                         href={`http://localhost:${port}`}
                         target="_blank"
                         rel="noopener"
-                        className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono tabular-nums hover:bg-muted"
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono tabular-nums hover:bg-muted studio:rounded-sm studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground"
                       >
                         :{port}
                         <ExternalLinkIcon className="size-3" />

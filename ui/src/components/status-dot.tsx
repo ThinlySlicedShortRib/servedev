@@ -6,6 +6,7 @@ import { useStyleId } from "@/components/style-provider"
 export function StatusDot({ status, className }: { status: Status | "idle"; className?: string }) {
   const style = useStyleId()
   if (style === "terminal") return <TerminalStatusGlyph status={status} className={className} />
+  if (style === "studio") return <StudioStatusDot status={status} className={className} />
   return (
     <span
       aria-hidden
@@ -75,5 +76,27 @@ export function statusTagClass(status: Status | "idle" | undefined) {
     (status === "starting" || status === "stopping") && "terminal:border-warning/60 terminal:bg-warning/10 terminal:text-warning",
     status === "crashed" && "terminal:border-destructive terminal:bg-destructive terminal:text-background terminal:dark:bg-destructive",
     (status === "stopped" || status === "exited" || status === "idle" || !status) && "terminal:border-border terminal:bg-transparent terminal:text-muted-foreground"
+  )
+}
+
+/**
+ * Studio style: healthy is quiet, only a crash is loud. Colors crossfade between states;
+ * a soft ring grows out while starting, and twice when it crashes (.studio-dot in studio.css).
+ */
+function StudioStatusDot({ status, className }: { status: Status | "idle"; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      data-status={status}
+      className={cn(
+        "studio-dot inline-block size-2 shrink-0 rounded-full",
+        status === "running" && "bg-success",
+        (status === "starting" || status === "stopping") && "bg-warning",
+        status === "crashed" && "bg-destructive shadow-[0_0_0_3px_color-mix(in_oklch,var(--destructive)_22%,transparent)]",
+        (status === "stopped" || status === "exited") && "bg-muted-foreground/35",
+        status === "idle" && "border border-muted-foreground/50",
+        className
+      )}
+    />
   )
 }

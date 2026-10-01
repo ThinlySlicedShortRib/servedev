@@ -5,6 +5,7 @@ import "react-grid-layout/css/styles.css"
 
 import { DRAG_HANDLE, NO_DRAG, ServerTile } from "@/components/server-tile"
 import { useStyleId } from "@/components/style-provider"
+import { GridIllustration } from "@/components/studio-decor"
 import { useMultiLogStream } from "@/hooks/use-multi-log"
 import { TILE } from "@/hooks/use-custom-grid"
 import { SERVER_MIME } from "@/lib/drag"
@@ -47,7 +48,9 @@ export function GridView({
   onOpenDetails: (id: string) => void
 }) {
   const { width, containerRef, mounted } = useContainerWidth()
-  const terminal = useStyleId() === "terminal"
+  const styleId = useStyleId()
+  const terminal = styleId === "terminal"
+  const studio = styleId === "studio"
   const shown = React.useMemo(() => items.filter((it) => servers.has(it.i)), [items, servers])
   // Stable across renders (logs stream in constantly); the grid compares it to its own state.
   const layout = React.useMemo(() => shown.map((it) => ({ ...it, minW: TILE.minW, minH: TILE.minH })), [shown])
@@ -72,15 +75,15 @@ export function GridView({
   }
 
   const empty = shown.length === 0 && (
-    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center terminal:inset-3 terminal:border terminal:border-dashed terminal:border-input">
+    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center terminal:inset-3 terminal:border terminal:border-dashed terminal:border-input studio:animate-in studio:fade-in-0 studio:slide-in-from-bottom-1 studio:duration-500">
       {terminal && (
         // Decorative: an empty 2x2 tmux layout.
         <pre aria-hidden className="mb-2 text-[10px] leading-[1.15] text-muted-foreground select-none">
           {"┌────────┬────────┐\n│        │        │\n│ $ _    │        │\n├────────┼────────┤\n│        │        │\n│        │        │\n└────────┴────────┘"}
         </pre>
       )}
-      <LayoutGridIcon className="size-6 text-muted-foreground terminal:size-4 terminal:text-primary" />
-      <p className="phosphor-glow text-sm font-medium terminal:font-semibold">
+      {studio ? <GridIllustration className="mb-2" /> : <LayoutGridIcon className="size-6 text-muted-foreground terminal:size-4 terminal:text-primary" />}
+      <p className="phosphor-glow text-sm font-medium terminal:font-semibold studio:tracking-tight">
         Build your grid
         {terminal && <span aria-hidden className="term-cursor ml-1" />}
       </p>

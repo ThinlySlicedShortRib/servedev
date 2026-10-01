@@ -17,6 +17,7 @@ import { toast } from "sonner"
 import { AccountTag } from "@/components/account-tag"
 import { StatusDot, statusTagClass } from "@/components/status-dot"
 import { useStyleId } from "@/components/style-provider"
+import { cn } from "@/lib/utils"
 import { useStartProfile } from "@/hooks/use-accounts"
 import { BranchTag } from "@/components/branch-tag"
 import { Hint } from "@/components/hint"
@@ -54,7 +55,9 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
   const active = !!s && ACTIVE.includes(s.status)
   const [busy, setBusy] = React.useState<Action | null>(null)
   const startProfile = useStartProfile(s?.id)
-  const terminal = useStyleId() === "terminal"
+  const styleId = useStyleId()
+  const terminal = styleId === "terminal"
+  const studio = styleId === "studio"
   const [tab, setTab] = React.useState<"logs" | "processes" | "preview">("logs")
   const [editingHost, setEditingHost] = React.useState(false)
   const [savingConfig, setSavingConfig] = React.useState(false)
@@ -134,16 +137,17 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
       <div className="flex flex-col gap-4 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold terminal:flex terminal:items-baseline terminal:gap-2 terminal:text-lg">
+            <h1 className="text-xl font-semibold terminal:flex terminal:items-baseline terminal:gap-2 terminal:text-lg studio:text-lg studio:tracking-tight">
               <span aria-hidden className="hidden text-primary select-none terminal:inline">❯</span>
               {entry.name}
             </h1>
-            <Badge variant={statusVariant} className={statusTagClass(s?.status)}>
+            <Badge variant={statusVariant} className={cn(statusTagClass(s?.status), "studio:gap-1.5 studio:font-normal")}>
+              {studio && <StatusDot status={entry.status} className="size-1.5" />}
               {terminal && s && (s.status === "starting" || s.status === "stopping") && <StatusDot status={s.status} />}
               {s ? statusLabel(s) : "not started"}
             </Badge>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 studio:gap-1.5">
             {s && (
               <Hint
                 label={
@@ -250,7 +254,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           </div>
         </div>
 
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm studio:gap-x-8 studio:gap-y-2 studio:leading-5">
           {s && (s.url || s.hostname) && (
             <>
               <dt className="text-muted-foreground">URL</dt>
@@ -260,7 +264,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
                     href={s.customUrl ?? `http://${s.hostname}`}
                     target="_blank"
                     rel="noopener"
-                    className="font-mono underline-offset-4 hover:underline"
+                    className="font-mono underline-offset-4 hover:underline studio:text-xs"
                   >
                     {s.customUrl ?? `http://${s.hostname}`}
                   </a>
@@ -272,8 +276,8 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
                     rel="noopener"
                     className={
                       s.hostname
-                        ? "font-mono text-muted-foreground underline-offset-4 hover:underline"
-                        : "font-mono underline-offset-4 hover:underline"
+                        ? "font-mono text-muted-foreground underline-offset-4 hover:underline studio:text-xs"
+                        : "font-mono underline-offset-4 hover:underline studio:text-xs"
                     }
                     title={
                       s.hostname
@@ -328,7 +332,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               <dd className="flex min-w-0 flex-wrap gap-1.5">
                 {s.vars.map((v) => (
                   <Hint key={v.name} label={`${v.name} is set for this server on purpose${v.secret ? " (looks like a secret)" : ""}. Everything else comes from your login shell at each start.`}>
-                    <span className="inline-flex max-w-full items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-xs">
+                    <span className="inline-flex max-w-full items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-xs studio:bg-muted/40 studio:text-[11px]">
                       {v.secret && <LockIcon className="size-3 shrink-0 text-muted-foreground" aria-label="secret" />}
                       <span className="truncate">
                         {v.name}=<span className="text-muted-foreground">{v.preview}</span>
@@ -340,7 +344,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
             </>
           )}
           <dt className="text-muted-foreground">Command</dt>
-          <dd className="font-mono break-all">{command}</dd>
+          <dd className="font-mono break-all studio:text-xs studio:leading-5">{command}</dd>
           {(s?.branch ?? entry.configured?.branch) && (
             <>
               <dt className="text-muted-foreground">Branch</dt>
@@ -368,7 +372,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           {(s?.cwd ?? entry.configured?.root) && (
             <>
               <dt className="text-muted-foreground">Directory</dt>
-              <dd className="font-mono break-all">
+              <dd className="font-mono break-all studio:text-xs studio:leading-5">
                 {tildify(s?.cwd ?? entry.configured!.root)}
               </dd>
             </>
@@ -376,9 +380,9 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           {active && (
             <>
               <dt className="text-muted-foreground">PID</dt>
-              <dd className="font-mono">{s.pid}</dd>
+              <dd className="font-mono studio:text-xs studio:leading-5">{s.pid}</dd>
               <dt className="text-muted-foreground">Uptime</dt>
-              <dd>{ago(s.startedAt, now)}</dd>
+              <dd className="studio:tabular-nums">{ago(s.startedAt, now)}</dd>
             </>
           )}
           {active && groups && groups.length > 0 && (
@@ -401,13 +405,13 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           {active && s.ports.length > 1 && (
             <>
               <dt className="text-muted-foreground">Ports</dt>
-              <dd className="font-mono">{s.ports.join(", ")}</dd>
+              <dd className="font-mono studio:text-xs studio:leading-5">{s.ports.join(", ")}</dd>
             </>
           )}
           {s && !active && s.stoppedAt && (
             <>
               <dt className="text-muted-foreground">Stopped</dt>
-              <dd>{ago(s.stoppedAt, now)} ago</dd>
+              <dd className="studio:tabular-nums">{ago(s.stoppedAt, now)} ago</dd>
             </>
           )}
         </dl>
@@ -448,7 +452,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               <TabsTrigger value="processes" disabled={!s}>
                 Processes
                 {active && groups && (
-                  <span className="text-muted-foreground tabular-nums">
+                  <span className="text-muted-foreground tabular-nums studio:rounded-[4px] studio:bg-foreground/[0.06] studio:px-1 studio:text-[11px] studio:leading-4">
                     {processCount}
                     {groups.length > 1 ? ` in ${groups.length} groups` : ""}
                   </span>

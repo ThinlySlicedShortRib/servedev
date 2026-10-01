@@ -110,7 +110,7 @@ export function SaveConfigDialog({ server: s, open, onOpenChange }: { server: Se
             ) : (
               <pre className="max-h-64 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all" aria-label="Changes">
                 {changeLines(plan.changes).map((l) => (
-                  <div key={l.text} className={l.kind === "add" ? "text-emerald-700 dark:text-emerald-400 terminal:text-success terminal:dark:text-success" : l.kind === "remove" ? "text-destructive" : undefined}>
+                  <div key={l.text} className={l.kind === "add" ? "text-emerald-700 dark:text-emerald-400 terminal:text-success terminal:dark:text-success studio:text-success-foreground studio:dark:text-success-foreground" : l.kind === "remove" ? "text-destructive" : undefined}>
                     {l.text}
                   </div>
                 ))}
@@ -134,7 +134,7 @@ export function SaveConfigDialog({ server: s, open, onOpenChange }: { server: Se
                   </li>
                 ))}
                 {plan.warnings.map((w) => (
-                  <li key={w} className="break-all text-amber-700 dark:text-amber-400 terminal:text-warning terminal:dark:text-warning">
+                  <li key={w} className="break-all text-amber-700 dark:text-amber-400 terminal:text-warning terminal:dark:text-warning studio:text-warning-foreground studio:dark:text-warning-foreground">
                     {w}
                   </li>
                 ))}

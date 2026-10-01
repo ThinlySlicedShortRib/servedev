@@ -16,8 +16,8 @@ import { useStyleId } from "@/components/style-provider"
 const MAX_LINES = 5000
 
 function lineClass(line: string) {
-  if (/\b(error|failed|exception|fatal|panic)\b/i.test(line)) return "text-destructive"
-  if (/\bwarn(ing)?\b/i.test(line)) return "text-amber-600 dark:text-amber-400 terminal:text-warning terminal:dark:text-warning"
+  if (/\b(error|failed|exception|fatal|panic)\b/i.test(line)) return "text-destructive log-error"
+  if (/\bwarn(ing)?\b/i.test(line)) return "text-amber-600 dark:text-amber-400 terminal:text-warning terminal:dark:text-warning log-warn"
   return undefined
 }
 
@@ -76,7 +76,9 @@ export function LogView({
     }
   }, [serverId, choice, viewingPast])
   const [query, setQuery] = React.useState("")
-  const terminal = useStyleId() === "terminal"
+  const styleId = useStyleId()
+  const terminal = styleId === "terminal"
+  const studio = styleId === "studio"
   const [follow, setFollow] = React.useState(true)
   const rootRef = React.useRef<HTMLDivElement>(null)
   const preRef = React.useRef<HTMLPreElement>(null)
@@ -123,7 +125,7 @@ export function LogView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-4 px-4 py-2 md:px-6">
+      <div className="flex flex-wrap items-center gap-4 px-4 py-2 md:px-6 studio:gap-3 studio:border-b">
         {runs.length > 1 && (
           <Select items={items} value={choice} onValueChange={(v) => v && setChoice(String(v))}>
             <Hint label="Choose a run: the current one, or an earlier start of this server (kept for the log retention period)">
@@ -165,24 +167,26 @@ export function LogView({
           command={command}
           runLabel={items.find((i) => i.value === choice)?.label ?? "Current run"}
         />
-        <span className="text-xs text-muted-foreground tabular-nums">
+        <span className="text-xs text-muted-foreground tabular-nums studio:text-[11px]">
           {query ? `${search.matches.length} matching ${search.matches.length === 1 ? "line" : "lines"} of ${total}` : `${total} ${total === 1 ? "line" : "lines"}`}
         </span>
       </div>
-      <ScrollArea ref={rootRef} className="min-h-0 flex-1 bg-muted/40 terminal:border-t terminal:bg-terminal">
-        <pre ref={preRef} className="log-lines relative px-4 py-3 pr-9 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap md:px-6 md:pr-9">
+      <ScrollArea ref={rootRef} className="min-h-0 flex-1 bg-muted/40 terminal:border-t terminal:bg-terminal studio:bg-surface-sunken">
+        {/* Studio style: a shadow that fades in once the log is scrolled. */}
+        {studio && <div aria-hidden className="studio-scroll-shadow pointer-events-none sticky top-0 z-10 -mb-2 h-2" />}
+        <pre ref={preRef} className="log-lines relative px-4 py-3 pr-9 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap md:px-6 md:pr-9 studio:leading-[1.6] studio:text-foreground/90">
           <LineCopy container={preRef} lines={lines} className="md:right-2" />
           {lines.length
             ? lines.map((l, i) => (
                 <div
                   key={i}
                   data-line={i}
-                  className={cn(lineClass(l), i === search.currentLine && "-mx-2 rounded-sm bg-orange-400/10 px-2 terminal:rounded-none terminal:bg-match/40 terminal:shadow-[inset_2px_0_0_var(--warning)]")}
+                  className={cn(lineClass(l), i === search.currentLine && "log-current -mx-2 rounded-sm bg-orange-400/10 px-2 terminal:rounded-none terminal:bg-match/40 terminal:shadow-[inset_2px_0_0_var(--warning)]")}
                 >
                   {search.matchSet.has(i) ? <HighlightedLine text={l} re={search.re} current={i === search.currentLine} /> : l || " "}
                 </div>
               ))
-            : <span className="text-muted-foreground">{empty}</span>}
+            : <span className="log-empty text-muted-foreground studio:block">{empty}</span>}
           {/* Terminal style: a cursor under live output. */}
           {terminal && !viewingPast && lines.length > 0 && (status === "running" || status === "starting") && (
             <span aria-hidden className="term-cursor select-none" />

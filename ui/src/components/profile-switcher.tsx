@@ -71,7 +71,7 @@ export function ProfileSwitcher({
                 <TruncatedText text={p.branch} />
               </>
             )}
-            {p.uncommitted && <span className="size-1.5 shrink-0 rounded-full bg-amber-500 terminal:rounded-[1px] terminal:bg-warning" aria-label="uncommitted changes" />}
+            {p.uncommitted && <span className="size-1.5 shrink-0 rounded-full bg-amber-500 terminal:rounded-[1px] terminal:bg-warning studio:bg-warning" aria-label="uncommitted changes" />}
           </span>
         )}
       </div>

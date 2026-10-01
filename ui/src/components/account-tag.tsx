@@ -17,7 +17,7 @@ export function AccountTag({ server: s, className }: { server: Server; className
     <span
       className={cn(
         "inline-flex min-w-0 items-center gap-1 rounded-sm border px-1 py-px text-[10px] leading-none text-muted-foreground",
-        s.accountsStale && "border-amber-500/50 text-amber-700 dark:text-amber-400 terminal:border-warning/50 terminal:text-warning terminal:dark:text-warning",
+        s.accountsStale && "border-amber-500/50 text-amber-700 dark:text-amber-400 terminal:border-warning/50 terminal:text-warning terminal:dark:text-warning studio:border-warning/50 studio:text-warning-foreground studio:dark:text-warning-foreground",
         className
       )}
     >

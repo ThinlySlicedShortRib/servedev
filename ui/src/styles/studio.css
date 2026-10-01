@@ -1,0 +1,546 @@
+/*
+ * Studio style: calm, precise pro tool. Cool-tinted neutrals (hue 265), one indigo accent,
+ * status colors quiet while healthy and loud only for a crash. Every rule is scoped to
+ * [data-style="studio"] (set on <html> by style-provider.tsx), so Classic is untouched.
+ * Unlayered on purpose: these rules beat Tailwind's utilities where a primitive needs it.
+ */
+
+/* Light */
+:root[data-style="studio"] {
+    --style-font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+    --style-font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+    --style-text-sm: 0.8125rem;
+    --style-text-sm-line-height: calc(20 / 13);
+    --background: oklch(0.992 0.002 265);
+    --foreground: oklch(0.215 0.012 265);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.215 0.012 265);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.215 0.012 265);
+    --primary: oklch(0.52 0.165 270);
+    --primary-foreground: oklch(0.99 0.004 270);
+    --secondary: oklch(0.962 0.004 265);
+    --secondary-foreground: oklch(0.27 0.012 265);
+    --muted: oklch(0.962 0.004 265);
+    --muted-foreground: oklch(0.5 0.014 265);
+    --accent: oklch(0.952 0.005 265);
+    --accent-foreground: oklch(0.215 0.012 265);
+    --destructive: oklch(0.555 0.215 25);
+    --success: oklch(0.63 0.115 158);
+    --success-foreground: oklch(0.47 0.1 158);
+    --warning: oklch(0.76 0.135 75);
+    --warning-foreground: oklch(0.52 0.12 62);
+    --surface-sunken: oklch(0.975 0.003 265);
+    --tooltip: oklch(0.25 0.012 265);
+    --match: oklch(0.76 0.135 75 / 0.3);
+    --match-current: oklch(0.76 0.135 75);
+    --tooltip-foreground: oklch(0.97 0.004 265);
+    --border: oklch(0.918 0.005 265);
+    --input: oklch(0.888 0.007 265);
+    --ring: oklch(0.58 0.15 270);
+    --studio-shadow: oklch(0.25 0.03 265 / 0.07);
+    --studio-shadow-strong: oklch(0.25 0.03 265 / 0.14);
+    --chart-1: oklch(0.52 0.165 270);
+    --chart-2: oklch(0.63 0.115 158);
+    --chart-3: oklch(0.76 0.135 75);
+    --chart-4: oklch(0.6 0.1 220);
+    --chart-5: oklch(0.5 0.014 265);
+    --radius: 0.5rem;
+    --sidebar: oklch(0.977 0.004 265);
+    --sidebar-foreground: oklch(0.255 0.012 265);
+    --sidebar-primary: oklch(0.52 0.165 270);
+    --sidebar-primary-foreground: oklch(0.99 0.004 270);
+    --sidebar-accent: oklch(0.935 0.007 265);
+    --sidebar-accent-foreground: oklch(0.19 0.012 265);
+    --sidebar-border: oklch(0.918 0.005 265);
+    --sidebar-ring: oklch(0.58 0.15 270);
+}
+
+/* Dark */
+:root[data-style="studio"].dark {
+    --background: oklch(0.168 0.006 265);
+    --foreground: oklch(0.93 0.006 265);
+    --card: oklch(0.193 0.007 265);
+    --card-foreground: oklch(0.93 0.006 265);
+    --popover: oklch(0.212 0.008 265);
+    --popover-foreground: oklch(0.93 0.006 265);
+    --primary: oklch(0.555 0.15 272);
+    --primary-foreground: oklch(0.99 0.004 270);
+    --secondary: oklch(0.24 0.008 265);
+    --secondary-foreground: oklch(0.9 0.006 265);
+    --muted: oklch(0.235 0.008 265);
+    --muted-foreground: oklch(0.68 0.014 265);
+    --accent: oklch(0.25 0.009 265);
+    --accent-foreground: oklch(0.95 0.006 265);
+    --destructive: oklch(0.685 0.19 22);
+    --success: oklch(0.7 0.11 158);
+    --success-foreground: oklch(0.76 0.1 158);
+    --warning: oklch(0.79 0.12 78);
+    --warning-foreground: oklch(0.82 0.11 80);
+    --surface-sunken: oklch(0.148 0.006 265);
+    --tooltip: oklch(0.29 0.01 265);
+    --match: oklch(0.79 0.12 78 / 0.22);
+    --match-current: oklch(0.79 0.12 78);
+    --tooltip-foreground: oklch(0.96 0.004 265);
+    --border: oklch(0.95 0.01 265 / 8%);
+    --input: oklch(0.95 0.01 265 / 12%);
+    --ring: oklch(0.68 0.13 272);
+    --studio-shadow: oklch(0 0 0 / 0.28);
+    --studio-shadow-strong: oklch(0 0 0 / 0.5);
+    --chart-1: oklch(0.68 0.13 272);
+    --chart-2: oklch(0.7 0.11 158);
+    --chart-3: oklch(0.79 0.12 78);
+    --chart-4: oklch(0.7 0.09 220);
+    --chart-5: oklch(0.68 0.014 265);
+    --sidebar: oklch(0.152 0.006 265);
+    --sidebar-foreground: oklch(0.88 0.006 265);
+    --sidebar-primary: oklch(0.68 0.13 272);
+    --sidebar-primary-foreground: oklch(0.17 0.01 270);
+    --sidebar-accent: oklch(0.225 0.009 265);
+    --sidebar-accent-foreground: oklch(0.96 0.006 265);
+    --sidebar-border: oklch(0.95 0.01 265 / 7%);
+    --sidebar-ring: oklch(0.68 0.13 272);
+}
+
+/* ---------- Base ---------- */
+:root[data-style="studio"] {
+    --studio-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --studio-spring: cubic-bezier(0.16, 1, 0.3, 1);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+}
+[data-style="studio"] * {
+    scrollbar-width: thin;
+}
+[data-style="studio"] ::selection {
+    background: color-mix(in oklch, var(--primary) 26%, transparent);
+}
+/* Ports, pids, ids and log output line up in columns. */
+[data-style="studio"] :is(code, kbd, pre, samp, .font-mono) {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "liga" 0, "calt" 0;
+}
+
+/* ---------- Icons: one stroke weight; tiny icons a touch heavier ---------- */
+[data-style="studio"] svg.lucide { stroke-width: 1.6; }
+[data-style="studio"] svg.lucide[class*="size-3"] { stroke-width: 1.85; }
+/* Pressed toggles get a faint fill: outline at rest, "lit" when on. */
+[data-style="studio"] [class~="group/toggle"][aria-pressed="true"] svg.lucide {
+    fill: color-mix(in oklch, currentColor 16%, transparent);
+}
+
+/* ---------- Elevation: soft tinted shadows; hairlines carry the edges ---------- */
+[data-style="studio"] .shadow-xs { --tw-shadow: 0 1px 1px 0 var(--studio-shadow); }
+[data-style="studio"] .shadow-sm { --tw-shadow: 0 1px 2px 0 var(--studio-shadow), 0 1px 1px -1px var(--studio-shadow); }
+[data-style="studio"] .shadow-md { --tw-shadow: 0 4px 12px -2px var(--studio-shadow), 0 2px 4px -2px var(--studio-shadow); }
+[data-style="studio"] .shadow-lg { --tw-shadow: 0 12px 32px -6px var(--studio-shadow-strong), 0 4px 8px -4px var(--studio-shadow); }
+[data-style="studio"] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) {
+    background-color: oklch(0.2 0.02 265 / 0.22);
+    --tw-backdrop-blur: blur(2px);
+}
+[data-style="studio"].dark :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"], [data-slot="sheet-overlay"]) {
+    background-color: oklch(0 0 0 / 0.55);
+}
+
+/* ---------- Motion: popups spring in, leave quickly ---------- */
+[data-style="studio"] :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"], [data-slot="select-content"], [data-slot="combobox-content"]) {
+    --tw-enter-translate-y: 0;
+    --tw-enter-translate-x: 0;
+}
+[data-style="studio"] :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"], [data-slot="select-content"], [data-slot="combobox-content"])[data-open] {
+    animation-duration: 160ms;
+    animation-timing-function: var(--studio-spring);
+}
+[data-style="studio"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"])[data-open] {
+    animation-duration: 220ms;
+    animation-timing-function: var(--studio-spring);
+}
+[data-style="studio"] :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"])[data-open] {
+    animation-duration: 200ms;
+}
+[data-style="studio"] :is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"], [data-slot="select-content"], [data-slot="combobox-content"], [data-slot="dialog-content"], [data-slot="alert-dialog-content"])[data-closed] {
+    animation-duration: 100ms;
+}
+[data-style="studio"] [data-slot="sheet-content"] {
+    transition-duration: 300ms;
+    transition-timing-function: var(--studio-spring);
+}
+[data-style="studio"] [data-slot="sheet-content"][data-ending-style] {
+    transition-duration: 150ms;
+    transition-timing-function: ease-in;
+}
+[data-style="studio"] :is([data-slot="sidebar-container"], [data-slot="sidebar-gap"], [data-sidebar="group-label"], [data-sidebar="rail"]) {
+    transition-timing-function: var(--studio-ease);
+}
+
+/* ---------- Floating panels ---------- */
+[data-style="studio"] :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) {
+    --tw-shadow: 0 12px 32px -6px var(--studio-shadow-strong), 0 4px 8px -4px var(--studio-shadow);
+}
+[data-style="studio"] :is([data-slot="dialog-footer"], [data-slot="alert-dialog-footer"]) {
+    background-color: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+[data-style="studio"] [data-slot="sheet-content"] {
+    --tw-ring-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 5%, transparent);
+}
+[data-style="studio"] :is([data-slot="dialog-title"], [data-slot="alert-dialog-title"], [data-slot="sheet-title"]) {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+}
+[data-style="studio"] [data-slot="tooltip-content"] {
+    background-color: var(--tooltip);
+    color: var(--tooltip-foreground);
+    padding-inline: 0.625rem;
+    --tw-shadow: 0 4px 12px -2px var(--studio-shadow), 0 2px 4px -2px var(--studio-shadow);
+    --tw-ring-shadow: 0 0 0 1px oklch(1 0 0 / 0.06);
+}
+[data-style="studio"] [data-slot="tooltip-content"] > [class~="fill-foreground"] {
+    background-color: var(--tooltip);
+    fill: var(--tooltip);
+}
+
+/* ---------- Controls ---------- */
+[data-style="studio"] [class~="group/button"] {
+    transition-property: color, background-color, border-color, box-shadow, opacity, translate;
+    transition-duration: 150ms;
+}
+[data-style="studio"] [class~="group/button"]:focus-visible {
+    border-color: transparent;
+    --tw-ring-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--ring);
+}
+[data-style="studio"] [class~="group/button"][class~="bg-primary"] {
+    --tw-shadow: 0 1px 1px 0 var(--studio-shadow);
+}
+[data-style="studio"] [class~="group/button"][class~="bg-primary"]:hover {
+    background-color: color-mix(in oklch, var(--primary) 90%, transparent);
+}
+[data-style="studio"]:not(.dark) [class~="group/button"][class~="border-border"][class~="bg-background"] {
+    background-color: var(--card);
+    --tw-shadow: 0 1px 1px 0 var(--studio-shadow);
+}
+[data-style="studio"]:not(.dark) [class~="group/button"][class~="border-border"][class~="bg-background"]:hover {
+    background-color: var(--muted);
+}
+[data-style="studio"] :is([data-slot="input"], [data-slot="input-group"], [data-slot="select-trigger"], [data-slot="textarea"]) {
+    transition-property: color, border-color, box-shadow;
+    transition-duration: 150ms;
+}
+[data-style="studio"]:not(.dark) :is([data-slot="input"], [data-slot="input-group"], [data-slot="select-trigger"]) {
+    background-color: var(--card);
+    --tw-shadow: 0 1px 1px 0 var(--studio-shadow);
+}
+[data-style="studio"] :is([data-slot="input"], [data-slot="select-trigger"], [data-slot="textarea"]):focus-visible,
+[data-style="studio"] [data-slot="input-group"]:has([data-slot="input-group-control"]:focus-visible) {
+    --tw-ring-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 20%, transparent);
+}
+[data-style="studio"] [data-slot="input-group"] { border-radius: calc(var(--radius) * 0.8); }
+[data-style="studio"] [data-slot="input-group-control"] { --tw-shadow: 0 0 #0000; background-color: transparent; }
+
+/* Badges: small rounded rectangles, quieter weight. */
+[data-style="studio"] [class~="group/badge"] {
+    border-radius: calc(var(--radius) * 0.8);
+    padding-inline: 0.375rem;
+    font-size: 11px;
+}
+[data-style="studio"] [class~="group/badge"][class~="bg-secondary"] { border-color: var(--border); }
+[data-style="studio"] [class~="group/badge"][class~="text-destructive"] { border-color: color-mix(in oklch, var(--destructive) 25%, transparent); }
+
+/* Keycaps. */
+[data-style="studio"] [data-slot="kbd"] {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: var(--card);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    box-shadow: inset 0 -1px 0 var(--border);
+}
+[data-style="studio"].dark [data-slot="kbd"] { background-color: color-mix(in oklch, var(--muted) 60%, transparent); }
+[data-style="studio"] [data-slot="tooltip-content"] [data-slot="kbd"] {
+    border-color: color-mix(in oklch, var(--tooltip-foreground) 15%, transparent);
+    background-color: color-mix(in oklch, var(--tooltip-foreground) 10%, transparent);
+    color: color-mix(in oklch, var(--tooltip-foreground) 80%, transparent);
+    box-shadow: none;
+}
+
+/* Alerts: the destructive one gets a red-tinted surface. */
+[data-style="studio"] [data-slot="alert"] { padding: 0.625rem 0.75rem; }
+[data-style="studio"] [data-slot="alert"].text-destructive {
+    border-color: color-mix(in oklch, var(--destructive) 30%, transparent);
+    background-color: color-mix(in oklch, var(--destructive) 6%, transparent);
+}
+
+/* Toggles: muted until pressed. Outline groups become one segmented control: a recessed
+   track and a raised thumb (the thumb is .studio-thumb in toggle-group.tsx; it glides). */
+[data-style="studio"] [class~="group/toggle"] {
+    color: var(--muted-foreground);
+    transition-property: color, background-color, box-shadow;
+    transition-duration: 150ms;
+}
+[data-style="studio"] [class~="group/toggle"]:is(:hover, [aria-pressed="true"]) { color: var(--foreground); }
+[data-style="studio"] [class~="group/toggle"]:focus-visible {
+    border-color: transparent;
+    --tw-ring-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 80%, transparent);
+}
+[data-style="studio"] [data-slot="toggle-group"][data-variant="outline"] {
+    position: relative;
+    isolation: isolate;
+    gap: 0;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background-color: color-mix(in oklch, var(--muted) 60%, transparent);
+}
+[data-style="studio"].dark [data-slot="toggle-group"][data-variant="outline"] {
+    background-color: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+[data-style="studio"] [data-slot="toggle-group"][data-variant="outline"] [class~="group/toggle"] {
+    height: 1.5rem;
+    border: 0;
+    border-radius: 5px;
+    background-color: transparent;
+    --tw-shadow: 0 0 #0000;
+}
+.studio-thumb {
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: -1;
+    border-radius: 5px;
+    background-color: var(--card);
+    opacity: 0;
+    box-shadow: 0 1px 1px 0 var(--studio-shadow), 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
+}
+.dark .studio-thumb {
+    background-color: var(--accent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
+}
+.studio-thumb[data-ready] {
+    transition: transform 250ms var(--studio-spring), width 250ms var(--studio-spring), height 250ms var(--studio-spring), opacity 150ms;
+}
+
+/* Tabs: the same track; one thumb (Base UI's tab indicator) glides to the active tab. */
+[data-style="studio"] [data-slot="tabs-list"][data-variant="default"] {
+    position: relative;
+    isolation: isolate;
+    padding: 2px;
+    border: 1px solid var(--border);
+    background-color: color-mix(in oklch, var(--muted) 60%, transparent);
+}
+[data-style="studio"].dark [data-slot="tabs-list"][data-variant="default"] {
+    background-color: color-mix(in oklch, var(--muted) 40%, transparent);
+}
+[data-style="studio"] [data-slot="tabs-list"][data-variant="default"] [role="tab"] {
+    padding-inline: 0.5rem;
+    color: var(--muted-foreground);
+    transition-property: color, box-shadow;
+    transition-duration: 150ms;
+}
+[data-style="studio"] [data-slot="tabs-list"][data-variant="default"] [role="tab"]:is(:hover, [data-active]) { color: var(--foreground); }
+[data-style="studio"] [data-slot="tabs-list"][data-variant="default"] [role="tab"][data-active] {
+    background-color: transparent;
+    border-color: transparent;
+    --tw-shadow: 0 0 #0000;
+}
+[data-style="studio"] [data-slot="tabs-list"] [role="tab"]:focus-visible {
+    border-color: transparent;
+    outline: none;
+    --tw-ring-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 80%, transparent);
+}
+.studio-tab-thumb {
+    pointer-events: none;
+    position: absolute;
+    z-index: -1;
+    top: var(--active-tab-top);
+    left: var(--active-tab-left);
+    width: var(--active-tab-width);
+    height: var(--active-tab-height);
+    border-radius: calc(var(--radius) * 0.8);
+    background-color: var(--card);
+    box-shadow: 0 1px 1px 0 var(--studio-shadow), 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
+    transition: left 250ms var(--studio-spring), top 250ms var(--studio-spring), width 250ms var(--studio-spring), height 250ms var(--studio-spring);
+}
+.dark .studio-tab-thumb {
+    background-color: var(--accent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 10%, transparent);
+}
+
+/* ---------- Sidebar ---------- */
+[data-style="studio"] [data-sidebar="group-label"] {
+    height: 1.75rem;
+    font-size: 11px;
+    letter-spacing: 0.025em;
+    color: var(--muted-foreground);
+}
+[data-style="studio"] [data-sidebar="menu-button"] {
+    position: relative;
+    transition-property: width, height, padding, background-color, color;
+    transition-duration: 150ms;
+}
+[data-style="studio"] [data-sidebar="menu-button"]:hover:not([data-active]) {
+    background-color: color-mix(in oklch, var(--sidebar-accent) 60%, transparent);
+}
+/* An accent bar grows in on the selected row. */
+[data-style="studio"] [data-sidebar="menu-button"]::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 2px;
+    height: 0;
+    translate: 0 -50%;
+    border-radius: 999px;
+    background-color: var(--sidebar-primary);
+    transition: height 250ms var(--studio-spring);
+}
+[data-style="studio"] [data-sidebar="menu-button"][data-active]::before { height: 1rem; }
+[data-style="studio"] [data-collapsible="icon"] [data-sidebar="menu-button"]::before { display: none; }
+[data-style="studio"] [data-sidebar="rail"]:hover::after { background-color: color-mix(in oklch, var(--ring) 60%, transparent); }
+[data-style="studio"] [data-sidebar="menu-badge"] {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted-foreground);
+}
+
+/* ---------- Grid ---------- */
+[data-style="studio"] .react-grid-item.react-grid-placeholder {
+    opacity: 0.1;
+    border: 1px dashed var(--ring);
+}
+[data-style="studio"] .react-grid-item.react-draggable-dragging {
+    opacity: 0.92;
+    box-shadow: 0 12px 32px -6px var(--studio-shadow-strong);
+    border-radius: var(--radius);
+}
+
+/* ---------- Toasts ---------- */
+[data-style="studio"] .toaster {
+    --border-radius: calc(var(--radius) + 2px) !important;
+    --width: 22rem !important;
+}
+[data-style="studio"] .toaster [data-sonner-toast] {
+    gap: 0.625rem;
+    padding: 0.75rem 0.875rem;
+    box-shadow: 0 12px 32px -6px var(--studio-shadow-strong), 0 4px 8px -4px var(--studio-shadow), 0 0 0 1px color-mix(in oklch, var(--foreground) 4%, transparent);
+}
+[data-style="studio"] .toaster [data-sonner-toast] [data-title] { font-size: 13px; font-weight: 500; line-height: 1.25rem; }
+[data-style="studio"] .toaster [data-sonner-toast] [data-description] { font-size: 12px; line-height: 1rem; color: var(--muted-foreground); }
+[data-style="studio"] .toaster [data-sonner-toast] [data-icon] { align-self: flex-start; margin-top: 2px; }
+[data-style="studio"] .toaster [data-sonner-toast][data-type="success"] [data-icon] { color: var(--success-foreground); }
+[data-style="studio"] .toaster [data-sonner-toast][data-type="error"] [data-icon] { color: var(--destructive); }
+[data-style="studio"] .toaster [data-sonner-toast][data-type="warning"] [data-icon] { color: var(--warning-foreground); }
+[data-style="studio"] .toaster [data-sonner-toast][data-type="info"] [data-icon] { color: var(--primary); }
+
+/* ---------- Status dots (StatusDot adds .studio-dot in this style) ---------- */
+@keyframes studio-ping {
+    0% { transform: scale(1); opacity: 0.55; }
+    80%, 100% { transform: scale(2.6); opacity: 0; }
+}
+@keyframes studio-crash-flash {
+    0% { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--destructive) 70%, transparent), 0 0 0 0 color-mix(in oklch, var(--destructive) 35%, transparent); background-color: color-mix(in oklch, var(--destructive) 14%, transparent); }
+    45% { box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--destructive) 45%, transparent), 0 0 0 6px transparent; }
+    100% { box-shadow: inset 0 0 0 1px transparent, 0 0 0 0 transparent; }
+}
+@keyframes studio-breathe {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 40%, transparent); }
+    50% { opacity: 0.75; box-shadow: 0 0 0 3px transparent; }
+}
+@keyframes studio-shimmer {
+    from { background-position: 150% 0; }
+    to { background-position: -50% 0; }
+}
+@keyframes studio-row-in {
+    from { opacity: 0; transform: translateY(3px); }
+}
+@keyframes studio-fade-in {
+    to { opacity: 1; }
+}
+.studio-dot {
+    position: relative;
+    transition: background-color 400ms ease, box-shadow 400ms ease, border-color 400ms ease;
+}
+.studio-dot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+}
+.studio-dot:is([data-status="starting"], [data-status="stopping"])::after {
+    background: var(--warning);
+    animation: studio-ping 1.8s var(--studio-ease) infinite;
+}
+.studio-dot[data-status="crashed"]::after {
+    background: var(--destructive);
+    animation: studio-ping 1.1s var(--studio-ease) 2;
+}
+/* The one "attention" moment: a crashed row or tile flashes red once when the state appears. */
+[data-style="studio"] .studio-crash-flash { animation: studio-crash-flash 1.6s var(--studio-ease) 1; }
+.studio-live { animation: studio-breathe 2.8s ease-in-out infinite; }
+.studio-skeleton {
+    background: linear-gradient(90deg, var(--muted) 0%, color-mix(in oklch, var(--muted), var(--foreground) 6%) 50%, var(--muted) 100%);
+    background-size: 200% 100%;
+    animation: studio-shimmer 1.6s ease-in-out infinite;
+}
+[data-style="studio"] .studio-row-in { animation: studio-row-in 260ms var(--studio-spring) both; }
+
+/* ---------- Logs: hover tint; WARN/ERROR as a thin bar plus a faint wash ---------- */
+[data-style="studio"] .log-lines {
+    --log-pl: 1rem;
+    --log-pr: 2.25rem;
+    padding-inline: 0;
+}
+[data-style="studio"] .log-lines.log-compact { --log-pl: 0.625rem; --log-pr: 2rem; }
+@media (min-width: 48rem) {
+    [data-style="studio"] .log-lines:not(.log-compact) { --log-pl: 1.5rem; }
+}
+[data-style="studio"] .log-lines > :is([data-line], .log-empty) {
+    margin-inline: 0;
+    padding-inline: var(--log-pl) var(--log-pr);
+    border-radius: 0;
+}
+[data-style="studio"] .log-lines > [data-line]:hover { background-color: color-mix(in oklch, var(--foreground) 3.5%, transparent); }
+[data-style="studio"] .log-lines > [data-line].log-warn {
+    color: var(--warning-foreground);
+    background-color: color-mix(in oklch, var(--warning) 7%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--warning) 80%, transparent);
+}
+[data-style="studio"] .log-lines > [data-line].log-error {
+    color: var(--destructive);
+    background-color: color-mix(in oklch, var(--destructive) 7%, transparent);
+    box-shadow: inset 2px 0 0 var(--destructive);
+}
+[data-style="studio"] .log-lines > [data-line].log-current {
+    background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+    box-shadow: inset 2px 0 0 var(--primary);
+}
+/* A shadow under the log toolbar, faded in by scrolling (where scroll timelines exist). */
+.studio-scroll-shadow {
+    opacity: 0;
+    background: linear-gradient(to bottom, var(--studio-shadow-strong), transparent);
+}
+@supports (animation-timeline: scroll()) {
+    .studio-scroll-shadow {
+        animation: studio-fade-in linear both;
+        animation-timeline: scroll(nearest block);
+        animation-range: 0 32px;
+    }
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+    [data-style="studio"] :is(.studio-live, .studio-skeleton, .studio-crash-flash, .studio-row-in) { animation: none !important; }
+    .studio-dot::after { animation: none !important; }
+    [data-style="studio"] *,
+    [data-style="studio"] *::before,
+    [data-style="studio"] *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}

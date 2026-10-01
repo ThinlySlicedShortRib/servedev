@@ -68,10 +68,10 @@ export function HighlightedLine({ text, re, current }: { text: string; re: RegEx
       <mark
         key={start}
         className={cn(
-          "rounded-sm text-inherit terminal:rounded-none",
+          "rounded-sm text-inherit terminal:rounded-none studio:rounded-[3px]",
           current
-            ? "bg-orange-400/80 dark:bg-orange-500/70 terminal:bg-match-current terminal:dark:bg-match-current"
-            : "bg-yellow-300/70 dark:bg-yellow-500/35 terminal:bg-match terminal:dark:bg-match"
+            ? "bg-orange-400/80 dark:bg-orange-500/70 terminal:bg-match-current terminal:dark:bg-match-current studio:bg-match-current studio:dark:bg-match-current studio:text-[oklch(0.22_0.03_70)]"
+            : "bg-yellow-300/70 dark:bg-yellow-500/35 terminal:bg-match terminal:dark:bg-match studio:bg-match studio:dark:bg-match"
         )}
       >
         {m[0]}
@@ -136,7 +136,7 @@ export function LogSearchBar({
         aria-label="Search logs"
         autoFocus={autoFocus}
         spellCheck={false}
-        className={cn("font-mono", compact && "text-xs")}
+        className={cn("font-mono studio:text-xs studio:md:text-xs", compact && "text-xs studio:text-[11px] studio:md:text-[11px]")}
       />
       {value && (
         <InputGroupAddon align="inline-end">

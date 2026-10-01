@@ -7,6 +7,7 @@ import { type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 import { toggleVariants } from "@/components/ui/toggle"
+import { useStyleId } from "@/components/style-provider"
 
 const ToggleGroupContext = React.createContext<
   VariantProps<typeof toggleVariants> & {
@@ -19,6 +20,45 @@ const ToggleGroupContext = React.createContext<
   spacing: 2,
   orientation: "horizontal",
 })
+
+/**
+ * Studio style: one thumb under the pressed item of an outline group, so the selection glides
+ * between items instead of jumping. Presentational only: it reads data-pressed and sizes.
+ */
+function StudioThumb() {
+  const ref = React.useRef<HTMLSpanElement>(null)
+  React.useLayoutEffect(() => {
+    const thumb = ref.current
+    const group = thumb?.parentElement
+    if (!thumb || !group) return
+    const place = () => {
+      const item = group.querySelector<HTMLElement>("button[data-pressed]")
+      if (!item) {
+        thumb.style.opacity = "0"
+        return
+      }
+      const g = group.getBoundingClientRect()
+      const r = item.getBoundingClientRect()
+      thumb.style.width = `${r.width}px`
+      thumb.style.height = `${r.height}px`
+      thumb.style.transform = `translate(${r.left - g.left - group.clientLeft}px, ${r.top - g.top - group.clientTop}px)`
+      thumb.style.opacity = "1"
+      // Appear in place the first time; glide after that.
+      if (!("ready" in thumb.dataset)) requestAnimationFrame(() => (thumb.dataset.ready = ""))
+    }
+    place()
+    const mo = new MutationObserver(place)
+    mo.observe(group, { subtree: true, attributes: true, attributeFilter: ["data-pressed"] })
+    const ro = new ResizeObserver(place)
+    ro.observe(group)
+    group.querySelectorAll("button").forEach((el) => ro.observe(el))
+    return () => {
+      mo.disconnect()
+      ro.disconnect()
+    }
+  }, [])
+  return <span ref={ref} aria-hidden data-slot="toggle-group-thumb" className="studio-thumb" />
+}
 
 function ToggleGroup({
   className,
@@ -33,6 +73,7 @@ function ToggleGroup({
     spacing?: number
     orientation?: "horizontal" | "vertical"
   }) {
+  const studio = useStyleId() === "studio"
   return (
     <ToggleGroupPrimitive
       data-slot="toggle-group"
@@ -47,6 +88,7 @@ function ToggleGroup({
       )}
       {...props}
     >
+      {studio && variant === "outline" && <StudioThumb />}
       <ToggleGroupContext.Provider
         value={{ variant, size, spacing, orientation }}
       >

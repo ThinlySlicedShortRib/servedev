@@ -4,6 +4,8 @@ import { CheckIcon, ExternalLinkIcon, PinIcon, PlusIcon, SearchIcon, Trash2Icon 
 import { StatusDot } from "@/components/status-dot"
 import { useStyleId } from "@/components/style-provider"
 import { LogoMark } from "@/components/terminal-decor"
+import { NoMatchIllustration, StudioLogoMark } from "@/components/studio-decor"
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
@@ -84,7 +86,9 @@ export function AppSidebar({
   const [query, setQuery] = React.useState("")
   const [status, setStatus] = React.useState<StatusFilter>(loadFilter)
   const searchRef = React.useRef<HTMLInputElement>(null)
-  const terminal = useStyleId() === "terminal"
+  const styleId = useStyleId()
+  const terminal = styleId === "terminal"
+  const studio = styleId === "studio"
 
   const all = React.useMemo(() => [...pinned, ...groups.flatMap(([, es]) => es)], [groups, pinned])
   const counts = React.useMemo(() => {
@@ -143,6 +147,29 @@ export function AppSidebar({
                 className={`flex items-center gap-1.5 text-[11px] font-semibold tracking-wider uppercase group-data-[collapsible=icon]:hidden ${connected ? "text-success" : connected === false ? "text-destructive" : "text-warning"}`}
               >
                 <StatusDot status={connected === null ? "starting" : connected ? "running" : "crashed"} />
+                {connected === null ? "Connecting…" : connected ? "Live" : "Disconnected"}
+              </span>
+            </>
+          ) : studio ? (
+            <>
+              <StudioLogoMark className="group-data-[collapsible=icon]:hidden" />
+              <span className="text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">servedev</span>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-1.5 py-px text-[10.5px] font-medium text-muted-foreground transition-colors duration-300 group-data-[collapsible=icon]:hidden",
+                  connected === false && "border-destructive/30 bg-destructive/[0.06] text-destructive"
+                )}
+              >
+                {/* Breathes while live, amber while (re)connecting, solid red when the daemon is gone. */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-1.5 rounded-full transition-colors duration-300",
+                    connected === null && "studio-live bg-warning text-warning",
+                    connected === true && "studio-live bg-success text-success",
+                    connected === false && "bg-destructive"
+                  )}
+                />
                 {connected === null ? "Connecting…" : connected ? "Live" : "Disconnected"}
               </span>
             </>
@@ -207,9 +234,13 @@ export function AppSidebar({
         >
           {FILTERS.map((f) => (
             <Hint key={f.value} label={`${f.hint} (${counts[f.value]})`}>
-              <ToggleGroupItem value={f.value} className="flex-1 px-1.5 text-xs terminal:flex-auto terminal:gap-1 terminal:px-1.5 terminal:text-[11px]">
+              <ToggleGroupItem value={f.value} className="flex-1 px-1.5 text-xs terminal:flex-auto terminal:gap-1 terminal:px-1.5 terminal:text-[11px] studio:min-w-0 studio:flex-auto studio:gap-1 studio:px-1.5 studio:text-[11.5px]">
                 {f.label}
-                {f.value === "crashed" && counts.crashed > 0 && <span className="text-destructive tabular-nums">{counts.crashed}</span>}
+                {f.value === "crashed" && counts.crashed > 0 && (
+                  <span className="text-destructive tabular-nums studio:-mr-0.5 studio:inline-flex studio:h-4 studio:min-w-4 studio:items-center studio:justify-center studio:rounded-full studio:bg-destructive studio:px-1 studio:text-[10px] studio:leading-none studio:font-semibold studio:text-white studio:animate-in studio:zoom-in-50 studio:duration-300 studio:dark:text-[oklch(0.18_0.02_25)]">
+                    {counts.crashed}
+                  </span>
+                )}
               </ToggleGroupItem>
             </Hint>
           ))}
@@ -217,8 +248,24 @@ export function AppSidebar({
       </SidebarHeader>
       {/* shadcn disables scrolling in the icon rail; with many servers the bottom ones would be unreachable. */}
       <SidebarContent className="group-data-[collapsible=icon]:overflow-auto">
+        {/* Studio style: shimmering placeholder rows while the first connection is pending. */}
+        {studio && connected === null && visible.length === 0 && (
+          <div aria-hidden className="flex flex-col gap-1 p-2 group-data-[collapsible=icon]:hidden">
+            <span className="studio-skeleton mx-2 mt-2 mb-1 h-2.5 w-16 rounded-full" />
+            {[0.72, 0.5, 0.64, 0.42].map((w, i) => (
+              <span key={i} className="flex h-12 items-center gap-2.5 px-2">
+                <span className="studio-skeleton size-2 shrink-0 rounded-full" />
+                <span className="flex flex-1 flex-col gap-1.5">
+                  <span className="studio-skeleton h-2.5 rounded-full" style={{ width: `${w * 100}%` }} />
+                  <span className="studio-skeleton h-2 w-1/3 rounded-full opacity-70" />
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
         {filtering && visible.length === 0 && (
-          <div className="flex flex-col items-start gap-1 px-4 py-6 text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">
+          <div className="flex flex-col items-start gap-1 px-4 py-6 text-sm text-muted-foreground group-data-[collapsible=icon]:hidden studio:animate-in studio:fade-in-0 studio:duration-300">
+            {studio && <NoMatchIllustration className="mb-2" />}
             No servers match{query.trim() ? ` "${query.trim()}"` : ""}{status !== "all" ? ` in ${status}` : ""}.
             <Button
               variant="link"
@@ -233,7 +280,7 @@ export function AppSidebar({
           </div>
         )}
         {visible.map(([project, entries]) => (
-          <SidebarGroup key={project} className="group/sidebar-group">
+          <SidebarGroup key={project} className="group/sidebar-group studio:py-1">
             {/* Shrunk to icons the label fades out but still overlaps the first row; let clicks and hover through. */}
             {project !== PINNED && entries.some((e) => e.server) && (
               <Hint label={`Remove ${project} from servedev: stops and forgets its ${entries.filter((e) => e.server).length} tracked ${entries.filter((e) => e.server).length === 1 ? "server" : "servers"}. Files on disk stay. (Asks first.)`} side="right">
@@ -278,7 +325,7 @@ export function AppSidebar({
                   const sub = project === PINNED ? `${e.project}, ${state}` : state
                   const port = s && portOf(s)
                   return (
-                    <SidebarMenuItem key={e.key} className="tree-row terminal:pl-5 terminal:group-data-[collapsible=icon]:pl-0">
+                    <SidebarMenuItem key={e.key} className="tree-row terminal:pl-5 terminal:group-data-[collapsible=icon]:pl-0 studio-row-in">
                       <SidebarMenuButton
                         draggable={!!grid && !!s && !grid.ids.has(s.id)}
                         onDragStart={(ev) => {
@@ -289,7 +336,7 @@ export function AppSidebar({
                         }}
                         size="lg"
                         // Outside servers carry a tag line; let the row grow instead of clipping it.
-                        className={x || (project === PINNED && branchOf(e)) ? "h-auto min-h-12 py-1.5" : undefined}
+                        className={cn(x || (project === PINNED && branchOf(e)) ? "h-auto min-h-12 py-1.5" : undefined, studio && e.status === "crashed" && "studio-crash-flash")}
                         tooltip={`${e.project} / ${e.name}, ${state}${s?.hostname ? `, ${s.hostname}` : port ? `, :${port}` : ""}`}
                         isActive={selected === e.key}
                         onClick={() => {
@@ -301,14 +348,14 @@ export function AppSidebar({
                         <span className="flex size-4 shrink-0 items-center justify-center group-data-[collapsible=icon]:size-8">
                           {x ? (
                             // Hollow: running, but not managed by servedev.
-                            <span aria-hidden className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-emerald-500 terminal:rounded-[1px] terminal:border-success" />
+                            <span aria-hidden className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-emerald-500 terminal:rounded-[1px] terminal:border-success studio:border-success" />
                           ) : (
                             <StatusDot status={e.status} />
                           )}
                         </span>
                         <div className="grid flex-1 text-left leading-tight">
-                          <TruncatedText text={e.name} className="font-medium" side="right" />
-                          <TruncatedText text={sub} className="text-xs text-muted-foreground" side="right" />
+                          <TruncatedText text={e.name} className={cn("font-medium", studio && e.status === "crashed" && "text-destructive")} side="right" />
+                          <TruncatedText text={sub} className="text-xs text-muted-foreground studio:tabular-nums" side="right" />
                           {project === PINNED && branchOf(e) && (
                             <span className="mt-0.5 flex">
                               <BranchTag branch={branchOf(e)!} />
@@ -339,7 +386,7 @@ export function AppSidebar({
                             aria-label={grid.ids.has(s.id) ? `Remove ${e.name} from the grid` : `Add ${e.name} to the grid`}
                             className="top-3"
                           >
-                            {grid.ids.has(s.id) ? <CheckIcon className="text-emerald-600 dark:text-emerald-400 terminal:text-success terminal:dark:text-success" /> : <PlusIcon />}
+                            {grid.ids.has(s.id) ? <CheckIcon className="text-emerald-600 dark:text-emerald-400 terminal:text-success terminal:dark:text-success studio:text-success-foreground studio:dark:text-success-foreground" /> : <PlusIcon />}
                           </SidebarMenuAction>
                         </Hint>
                       ) : x?.url ? (
@@ -347,7 +394,7 @@ export function AppSidebar({
                           <SidebarMenuAction
                             render={<a href={x.url} target="_blank" rel="noopener" />}
                             aria-label={`Open ${e.name} in a new tab`}
-                            className="top-2.5 aspect-auto h-6 w-auto gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3"
+                            className="top-2.5 aspect-auto h-6 w-auto gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3 studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground"
                           >
                             <span>{x.url.split(":").pop()}</span>
                             <ExternalLinkIcon />
@@ -359,7 +406,7 @@ export function AppSidebar({
                           <SidebarMenuAction
                             render={<a href={openUrl(s)} target="_blank" rel="noopener" />}
                             aria-label={`Open ${e.name} in a new tab`}
-                            className="top-2.5 aspect-auto h-6 w-auto max-w-32 gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3"
+                            className="top-2.5 aspect-auto h-6 w-auto max-w-32 gap-1 px-1.5 font-mono text-xs tabular-nums [&>svg]:size-3 studio:text-[11px] studio:text-muted-foreground studio:hover:text-foreground"
                           >
                             <span className="truncate">{s?.customUrl ? s.hostname : port}</span>
                             <ExternalLinkIcon />
