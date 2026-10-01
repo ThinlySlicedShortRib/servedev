@@ -32,7 +32,7 @@ export function AppearanceMenu() {
           <PaletteIcon />
         </DropdownMenuTrigger>
       </Hint>
-      <DropdownMenuContent align="end" className="min-w-56">
+      <DropdownMenuContent align="end" className="min-w-56 terminal:min-w-64">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Style</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={style} onValueChange={(v) => setStyle(v as StyleId)}>
