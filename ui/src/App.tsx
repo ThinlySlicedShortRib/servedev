@@ -2,6 +2,7 @@ import * as React from "react"
 import { FolderOpenIcon, LayoutGridIcon, MoreHorizontalIcon, RotateCcwIcon, SaveIcon, ServerIcon, SquareIcon, TriangleAlertIcon, UploadIcon } from "lucide-react"
 
 import { AccountsSheet } from "@/components/accounts-sheet"
+import { AppearanceMenu } from "@/components/appearance-menu"
 import { AppSidebar } from "@/components/app-sidebar"
 import { ConfigIssues } from "@/components/config-issues"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -258,6 +259,7 @@ export function App() {
                 : "Dev servers"}
           />
           <div className="ml-auto flex items-center gap-2">
+            <AppearanceMenu />
             <AccountsSheet />
             {view === "grid" && activeProfile?.kind === "shared" && (
               <DropdownMenu>

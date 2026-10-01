@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client"
 
 import "./index.css"
 import App from "./App.tsx"
+import { StyleProvider } from "@/components/style-provider"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -10,10 +11,12 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
-      <TooltipProvider>
-        <App />
-        <Toaster />
-      </TooltipProvider>
+      <StyleProvider>
+        <TooltipProvider>
+          <App />
+          <Toaster />
+        </TooltipProvider>
+      </StyleProvider>
     </ThemeProvider>
   </StrictMode>
 )

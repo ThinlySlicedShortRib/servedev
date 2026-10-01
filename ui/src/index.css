@@ -5,6 +5,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Dashboard styles (see style-provider.tsx): <html data-style="classic|studio|terminal|friendly">.
+ * Scope a style's CSS with [data-style="…"], or use these variants on classes: terminal:rounded-none.
+ */
+@custom-variant classic (&:where([data-style="classic"], [data-style="classic"] *));
+@custom-variant studio (&:where([data-style="studio"], [data-style="studio"] *));
+@custom-variant terminal (&:where([data-style="terminal"], [data-style="terminal"] *));
+@custom-variant friendly (&:where([data-style="friendly"], [data-style="friendly"] *));
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;

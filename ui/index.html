@@ -6,6 +6,15 @@
     <meta name="servedev-token" content="{{SERVEDEV_TOKEN}}" />
     <meta name="servedev-build" content="{{SERVEDEV_BUILD}}" />
     <title>servedev</title>
+    <script>
+      // The dashboard style (Classic, Studio, Terminal, Friendly), applied before the first paint.
+      try {
+        var s = localStorage.getItem("servedev:style")
+        document.documentElement.dataset.style = /^(classic|studio|terminal|friendly)$/.test(s) ? s : "classic"
+      } catch (e) {
+        document.documentElement.dataset.style = "classic"
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
