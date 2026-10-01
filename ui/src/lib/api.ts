@@ -108,6 +108,8 @@ export interface Profile {
   servers: string[]
   /** Shared: servers you don't start with it (your choice, in your config). */
   skipped: string[]
+  /** Every server it lists, skipped ones included, in start order. */
+  members: string[]
   /** Listed but not defined (anymore). */
   missing: string[]
   /** What its servers get: the repo's needs with your picks on top. */

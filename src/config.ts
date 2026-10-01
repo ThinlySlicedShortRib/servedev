@@ -458,6 +458,8 @@ export interface ProfileView {
   servers: string[];
   /** Server ids you skip (shared profiles). */
   skipped: string[];
+  /** Every defined server it lists, skipped ones included, in its order. */
+  members: string[];
   /** References to servers that aren't defined (anymore). */
   missing: string[];
   /** What its servers get: the repo's needs with your picks on top. */
@@ -651,6 +653,7 @@ export function resolveConfig(store: ConfigStore): Resolved {
         description: typeof pc.description === "string" ? pc.description : undefined,
         servers: ids.filter((x) => !skip.has(x.slice(info.label.length + 1))),
         skipped: ids.filter((x) => skip.has(x.slice(info.label.length + 1))),
+        members: ids,
         missing: missing.map(idOf),
         accounts: mergeSelections(needs, mine),
         needs,
@@ -694,6 +697,7 @@ export function resolveConfig(store: ConfigStore): Resolved {
       description: typeof lp.description === "string" ? lp.description : undefined,
       servers: ids,
       skipped: [],
+      members: ids,
       missing,
       accounts: mergeSelections({}, isObject(lp.accounts) ? (lp.accounts as Selections) : {}),
       file: store.localFile,

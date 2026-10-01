@@ -62,7 +62,7 @@ export function ProfileDialog({
     setDescription(profile?.description ?? "")
     // A new profile starts from whatever is running now.
     setMembers(
-      profile ? [...profile.servers, ...profile.skipped] : [...servers.values()].filter((s) => ACTIVE.includes(s.status)).map((s) => s.id)
+      profile ? profile.members : [...servers.values()].filter((s) => ACTIVE.includes(s.status)).map((s) => s.id)
     )
     setSkipped(profile?.skipped ?? [])
     setAccounts((profile?.kind === "shared" ? profile.mine : profile?.accounts) ?? {})
@@ -105,12 +105,15 @@ export function ProfileDialog({
     try {
       let r: { profile: Profile }
       if (profile) {
+        // Taken off the list: said explicitly, or the daemon keeps ones you skip (and ones from other branches).
+        const removed = profile.members.filter((id) => !members.includes(id))
         r = await api<{ profile: Profile }>("/api/profiles/update", {
           id: profile.id,
           version: profile.version,
           rename: name.trim(),
           description,
           servers: members,
+          ...(removed.length ? { remove: removed } : {}),
           accounts,
           ...(shared ? { needs, skip: skipped.filter((id) => members.includes(id)) } : {}),
         })

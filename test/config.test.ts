@@ -110,6 +110,7 @@ test("resolve: shared profiles, your overrides (accounts, skipped servers, grid)
     kind: "shared",
     servers: ["app:api", "app:web"],
     skipped: ["app:db"],
+    members: ["app:db", "app:api", "app:web"],
     missing: ["app:gone"],
     accounts: { gcloud: { project: "acme-dev", account: "me@x.com" } },
     grid: { source: "repo", hasRepoDefault: true, hasOverride: false },

@@ -1125,10 +1125,12 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     const expect = typeof body.version === "string" ? body.version : undefined;
     let servers: string[] | undefined;
     if (body.servers) servers = serverIds(body.root, body.servers);
-    if (body.add) servers = [...(servers ?? [...current.servers, ...current.skipped]), ...serverIds(body.root, body.add)];
+    if (body.add) servers = [...(servers ?? current.members), ...serverIds(body.root, body.add)];
     if (body.remove) {
-      const drop = new Set(serverIds(body.root, body.remove));
-      servers = (servers ?? [...current.servers, ...current.skipped]).filter((id) => !drop.has(id));
+      // A profile's missing entries aren't servers here, so they can't be resolved; they're dropped by name below.
+      const isMissing = (r: unknown) => current.missing.includes(String(r)) || current.missing.includes(`${current.project}:${r}`);
+      const drop = new Set(serverIds(body.root, [body.remove].flat().filter((r) => !isMissing(r))));
+      servers = (servers ?? current.members).filter((id) => !drop.has(id));
     }
     if (servers) servers = [...new Set(servers)];
     const rename = body.rename === undefined ? undefined : String(body.rename).trim();
@@ -1154,7 +1156,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
             const p = c.profiles?.[name];
             if (!p) throw new HttpError(404, `profile "${name}" is gone from config.json`);
             if (servers) {
-              p.servers = servers;
+              // Refs to servers that aren't defined right now (a project on another branch) stay unless removed.
+              const removed = new Set(body.remove ? [body.remove].flat().map(String) : []);
+              p.servers = [...servers, ...current.missing.filter((r) => !removed.has(r))];
               if (p.grid) p.grid = p.grid.filter((t) => servers!.includes(t.i));
             }
             if (picks) {
@@ -1194,7 +1198,10 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
             if (names) {
               // Servers you skip stay in the shared list; skipping is yours, not the team's.
               const skipped = current.skipped.map((id) => resolved.servers.get(id)!.name).filter((n) => !names.includes(n) && !body.remove);
-              p.servers = [...names, ...skipped];
+              // Names that aren't servers on this branch may be on another one; only an explicit remove drops them.
+              const dropped = new Set((body.remove ? [body.remove].flat() : []).map((r: unknown) => String(r).replace(`${current.project}:`, "")));
+              const elsewhere = (p.servers ?? []).filter((n) => !resolved.servers.has(`${current.project}:${n}`) && !names.includes(n) && !dropped.has(n));
+              p.servers = [...names, ...skipped, ...elsewhere];
               if (p.grid) p.grid = p.grid.filter((t) => p.servers.includes(t.i));
             }
             if (needs) {
