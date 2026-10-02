@@ -197,12 +197,15 @@ Environment: `SERVEDEV_HOME` (default `~/.servedev`), `SERVEDEV_PORT` (default `
 ## Development
 
 ```sh
+bun run dev                 # sandboxed dev mode: daemon from source + dashboard with hot reload
 bun src/cli.ts <command>    # run the CLI from source
 bun run ui:dev              # dashboard with hot reload (Vite), proxied to the running daemon
 bun test
 bun run typecheck
 bun run build               # builds ui/ then compiles dist/servedev
 ```
+
+`bun run dev` runs the daemon from source with `bun --watch` (it restarts when `src/` changes, and its servers keep running across restarts) and the dashboard on Vite at http://localhost:7779. It uses its own `SERVEDEV_HOME` (`~/.servedev-dev`) and port (`7778`), so your real daemon and servers are never touched; point the CLI at it with `SERVEDEV_HOME=~/.servedev-dev SERVEDEV_PORT=7778 bun src/cli.ts <command>`.
 
 The dashboard in `ui/` is React + [shadcn/ui](https://ui.shadcn.com) (default `base-nova` style). Add components with `npx shadcn@latest add <name>` from `ui/`. It builds to a single self-contained `ui/dist/index.html` that the daemon embeds.
 
