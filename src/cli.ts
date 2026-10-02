@@ -43,6 +43,7 @@ import {
   type OpResult,
 } from "./ops";
 import { clean } from "./logs";
+import { opRemoteAdd, opRemoteBoot, opRemoteList, opRemoteReconnect, opRemoteRemove } from "./remote/ops";
 import { DAEMON_LOG, DAEMON_URL, VERSION, getToken } from "./paths";
 import { findRoot, type ReadySpec } from "./project";
 
@@ -100,6 +101,15 @@ Usage:
   servedev grid [profile] / grid reset <profile>   show a grid / drop your layout of a shared profile's grid
   servedev setup [dirs...] [--apply] [--map project=path]   new machine: find your projects' repos by git remote
   servedev daemon [status|stop|restart]
+
+Other machines (this one is the hub; each machine runs its own servedev, reached over SSH):
+  servedev remote add <name> <user@host>    connect one and check it step by step (SSH, OS, servedev, token, API)
+  servedev remote ls                        machines: connected / reconnecting / offline, versions, servers
+  servedev remote rm <name>                 disconnect and forget it (nothing changes on that machine)
+  servedev remote reconnect <name>          reconnect now, re-reading its token
+  servedev remote boot <name> [--install]   Windows/WSL: start servedev at logon and keep WSL running
+  Their servers' ids start with the machine: pc/demo:api. Use them anywhere a server name goes, or add
+  --on <machine> to start, stop, restart, logs, status and ls (e.g. servedev logs api --on pc).
 
 Start options:
   --port <n|auto>       set $PORT (and {port} in the command); auto picks a free one
@@ -229,6 +239,7 @@ async function main() {
       description: { type: "string" },
       apply: { type: "boolean" },
       map: { type: "string", multiple: true },
+      on: { type: "string" },
     },
   });
 
@@ -239,6 +250,12 @@ async function main() {
   const cwd = process.cwd();
   const timeout = o.timeout ? Number(o.timeout) : undefined;
   let result: OpResult;
+  /** A server name, on the machine given with --on: "api" -> "pc/api". */
+  const on = (name: string | undefined): string | undefined => {
+    if (!o.on) return name;
+    if (!name) throw new Error(`pass a server name with --on: servedev ${cmd} <name> --on ${o.on}`);
+    return name.includes("/") ? name : `${o.on}/${name}`;
+  };
 
   switch (cmd) {
     case "start":
@@ -255,7 +272,7 @@ async function main() {
       const env = o.env ? parseEnv(o.env) : undefined;
       result = await opStart({
         cwd,
-        name: args[0],
+        name: on(args[0]),
         command,
         setup: o.setup,
         install: o.install,
@@ -277,17 +294,17 @@ async function main() {
     case "ls":
     case "list":
     case "ps":
-      result = await opList({ cwd, all: o.all });
+      result = await opList({ cwd, all: o.all, machine: o.on });
       break;
     case "status":
-      result = await opStatus({ cwd, name: args[0] });
+      result = await opStatus({ cwd, name: on(args[0]) });
       break;
     case "logs":
     case "log":
-      if (o.follow) return follow(cwd, args[0]);
+      if (o.follow) return follow(cwd, on(args[0]));
       result = await opLogs({
         cwd,
-        name: args[0],
+        name: on(args[0]),
         tail: o.lines === "all" ? "all" : o.lines ? Number(o.lines) : undefined,
         grep: o.grep,
         since: o.since,
@@ -410,11 +427,13 @@ async function main() {
       result = await opAddProject({ cwd, path: args[0] });
       break;
     case "restart":
-      result = await opRestart({ cwd, name: args[0], wait: !o["no-wait"], timeout, profile: o.profile });
+      result = await opRestart({ cwd, name: on(args[0]), wait: !o["no-wait"], timeout, profile: o.profile });
       break;
     case "stop":
     case "kill":
-      result = await opStop({ cwd, names: args, all: o.all });
+      if (o.on && !o.all && !args.length) throw new Error(`pass server names with --on (or --all for everything running on ${o.on})`);
+      if (o.on && o.all) result = await opStop({ cwd, names: [], all: true, machine: o.on });
+      else result = await opStop({ cwd, names: o.on ? args.map((n) => on(n)!) : args, all: o.all });
       break;
     case "down":
       result = await opStop({ cwd, names: [], all: true });
@@ -430,6 +449,26 @@ async function main() {
       if (!args[0]) throw new Error("usage: servedev rm <name>");
       result = await opRemove({ cwd, name: args[0] });
       break;
+    case "remote":
+    case "machine":
+    case "machines": {
+      const [sub, name, target] = args;
+      if (sub === "add") {
+        if (!name || !target) throw new Error("usage: servedev remote add <name> <user@host>");
+        result = await opRemoteAdd({ name, ssh: target });
+      } else if (!sub || sub === "ls" || sub === "list") result = await opRemoteList();
+      else if (sub === "rm" || sub === "remove") {
+        if (!name) throw new Error("usage: servedev remote rm <name>");
+        result = await opRemoteRemove(name);
+      } else if (sub === "reconnect") {
+        if (!name) throw new Error("usage: servedev remote reconnect <name>");
+        result = await opRemoteReconnect(name);
+      } else if (sub === "boot") {
+        if (!name) throw new Error("usage: servedev remote boot <name> [--install]");
+        result = await opRemoteBoot({ name, install: o.install });
+      } else throw new Error("usage: servedev remote add|ls|rm|reconnect|boot ...");
+      break;
+    }
     case "ui":
     case "dashboard": {
       await ensureDaemon();

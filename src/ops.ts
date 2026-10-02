@@ -9,6 +9,10 @@ import type { Preset } from "./logs";
 import type { PublicServer, ReadyResult } from "./manager";
 import { describeInstall } from "./install";
 import { findRoot, loadConfig, type ReadySpec } from "./project";
+import type { MachineSummary, RemoteServerView } from "./remote/types";
+
+/** A server from /api/servers: this machine's, or (with `machine`) another machine's. */
+type AnyServer = PublicServer & Partial<Pick<RemoteServerView, "machine" | "remoteId" | "stale" | "remoteUrl" | "machineState" | "localHostname">>;
 
 export interface OpResult {
   ok: boolean;
@@ -36,7 +40,7 @@ export interface StartArgs {
   profile?: string;
 }
 
-const SYMBOL: Record<string, string> = {
+export const SYMBOL: Record<string, string> = {
   running: "●",
   starting: "◌",
   stopping: "◌",
@@ -172,9 +176,16 @@ export async function opUp(a: { cwd: string; names?: string[]; timeout?: number 
   return { ok: true, text: lines.join("\n"), data };
 }
 
-export async function opStop(a: { cwd: string; names: string[]; all?: boolean }): Promise<OpResult> {
+export async function opStop(a: { cwd: string; names: string[]; all?: boolean; machine?: string }): Promise<OpResult> {
   const root = findRoot(a.cwd);
   let names = a.names;
+  if (a.all && a.machine) {
+    const { servers } = await api<{ servers: AnyServer[] }>("/api/servers");
+    const ids = servers.filter((s) => s.machine === a.machine && ["starting", "running"].includes(s.status)).map((s) => s.id);
+    if (!ids.length) return { ok: true, text: `nothing running on ${a.machine}.` };
+    const r = await api<{ stopped: string[] }>("/api/servers/stop", { ids });
+    return { ok: true, text: r.stopped.map((id) => `■ ${id} stopped`).join("\n"), data: r };
+  }
   if (a.all) {
     const { servers } = await api<{ servers: PublicServer[] }>("/api/servers");
     names = servers.filter((s) => s.root === root && ["starting", "running"].includes(s.status)).map((s) => s.name);
@@ -216,28 +227,53 @@ export async function opWait(a: { cwd: string; name?: string; timeout?: number }
   return describeStart({ ...r, alreadyRunning: false }, "");
 }
 
-export async function opList(a: { cwd: string; all?: boolean }): Promise<OpResult> {
+export async function opList(a: { cwd: string; all?: boolean; machine?: string }): Promise<OpResult> {
   const root = findRoot(a.cwd);
-  const { servers, configured } = await api<{ servers: PublicServer[]; configured: { root: string; name: string; command: string; project: string }[] }>(
-    "/api/servers",
-  );
-  const mine = a.all ? servers : servers.filter((s) => s.root === root);
-  const idle = configured.filter((c) => a.all || c.root === root);
-  const others = servers.filter((s) => s.root !== root && ["starting", "running"].includes(s.status));
-  const rows: string[][] = [["", a.all ? "ID" : "NAME", "STATUS", "URL", "BRANCH", "PID", "UPTIME", "COMMAND"]];
+  const { servers, configured, machines = [] } = await api<{
+    servers: AnyServer[];
+    configured: { root: string; name: string; command: string; project: string }[];
+    machines?: MachineSummary[];
+  }>("/api/servers");
+  if (a.machine && !machines.some((m) => m.name === a.machine)) {
+    throw new Error(`no machine called "${a.machine}"${machines.length ? ` (have: ${machines.map((m) => m.name).join(", ")})` : "; add one with servedev remote add"}`);
+  }
+  const mine = a.machine ? servers.filter((s) => s.machine === a.machine) : a.all ? servers : servers.filter((s) => !s.machine && s.root === root);
+  const idle = a.machine ? [] : configured.filter((c) => a.all || c.root === root);
+  const others = servers.filter((s) => !s.machine && s.root !== root && ["starting", "running"].includes(s.status));
+  const elsewhere = servers.filter((s) => s.machine && ["starting", "running"].includes(s.status));
+  const byId = a.all || !!a.machine;
+  const showMachine = a.all && mine.some((s) => s.machine);
+  const rows: string[][] = [["", ...(showMachine ? ["MACHINE"] : []), byId ? "ID" : "NAME", "STATUS", "URL", "BRANCH", "PID", "UPTIME", "COMMAND"]];
   for (const s of mine) {
     const active = ["starting", "running", "stopping"].includes(s.status);
     const status =
-      s.status + (s.exitCode != null && !active && s.status !== "stopped" ? ` (${s.exitCode})` : "") + (s.accountsStale ? " (accounts changed)" : "");
-    rows.push([SYMBOL[s.status] ?? " ", (a.all ? s.id : s.name) + (s.pinned ? " (pinned)" : ""), status, (active && (s.customUrl ?? s.url)) || "-", s.branch ?? "-", active ? String(s.pid) : "-", active ? ago(s.startedAt) : "-", s.command]);
+      s.status +
+      (s.exitCode != null && !active && s.status !== "stopped" ? ` (${s.exitCode})` : "") +
+      (s.accountsStale ? " (accounts changed)" : "") +
+      (s.stale ? " (last known)" : "");
+    rows.push([
+      SYMBOL[s.status] ?? " ",
+      ...(showMachine ? [s.machine ?? "local"] : []),
+      (byId ? s.id : s.name) + (s.pinned ? " (pinned)" : ""),
+      status,
+      (active && (s.customUrl ?? s.url ?? (s.stale ? s.remoteUrl && `${s.remoteUrl} on ${s.machine}` : undefined))) || "-",
+      s.branch ?? "-",
+      active ? String(s.pid) : "-",
+      active ? ago(s.startedAt) : "-",
+      s.command,
+    ]);
   }
-  for (const c of idle) rows.push([SYMBOL.idle, a.all ? `${c.project}:${c.name}` : c.name, "not started", "-", "-", "-", "-", c.command]);
-  let text = rows.length === 1 ? (a.all ? "no servers." : "no servers in this project.") : table(rows);
-  if (!a.all && others.length) text += `\n(${others.length} more running in other projects; use --all)`;
+  for (const c of idle) rows.push([SYMBOL.idle, ...(showMachine ? ["local"] : []), a.all ? `${c.project}:${c.name}` : c.name, "not started", "-", "-", "-", "-", c.command]);
+  let text = rows.length === 1 ? (a.machine ? `no servers on ${a.machine}.` : a.all ? "no servers." : "no servers in this project.") : table(rows);
+  if (!a.all && !a.machine && others.length) text += `\n(${others.length} more running in other projects; use --all)`;
+  if (!a.all && !a.machine && elsewhere.length) text += `\n(${elsewhere.length} running on other machines; use --all or --on <machine>)`;
+  for (const m of machines.filter((m) => (a.all || a.machine === m.name) && m.state !== "connected")) {
+    text += `\n(${m.name} is ${m.state}${m.lastSeen ? `, last seen ${ago(m.lastSeen)} ago` : ""}: its servers show their last known state${m.lastError ? `; ${m.lastError}` : ""})`;
+  }
   const stale = mine.filter((s) => s.accountsStale);
   if (stale.length) text += `\n(accounts changed: their profile picked other accounts since they started; restart ${stale.map((s) => (a.all ? s.id : s.name)).join(", ")} to apply)`;
   // Servers someone started outside servedev: shown so an agent knows why a port is taken.
-  const outside = (await listOutside().catch(() => [])).filter((x) => a.all || x.root === root);
+  const outside = a.machine ? [] : (await listOutside().catch(() => [])).filter((x) => a.all || x.root === root);
   if (outside.length) {
     text +=
       `\n\nRunning outside servedev (can't see their logs; take_over_server or the dashboard can take them over):\n` +
@@ -246,7 +282,7 @@ export async function opList(a: { cwd: string; all?: boolean }): Promise<OpResul
         ...outside.map((x) => [x.id + (x.orphaned ? " (folder deleted)" : ""), x.project, x.ports.join(","), x.startedAt ? ago(x.startedAt) : "-", x.command.slice(0, 70)]),
       ]);
   }
-  return { ok: true, text, data: { servers: mine, configured: idle, outside } };
+  return { ok: true, text, data: { servers: mine, configured: idle, outside, machines } };
 }
 
 /** Where a server's definition lives: the repo's servedev.json, your config.json, or both. */
@@ -269,11 +305,13 @@ export async function opStatus(a: { cwd: string; name?: string }): Promise<OpRes
     api<{ groups: ProcessGroup[] }>(`/api/processes?${q}`),
   ]);
   const procCount = groups.reduce((n, g) => n + g.processes.length, 0);
-  const s = r.server;
+  const s = r.server as AnyServer;
   const active = ["starting", "running", "stopping"].includes(s.status);
   const text = [
     `${SYMBOL[s.status]} ${s.id}: ${s.status}${s.exitCode != null && !active ? ` (exit code ${s.exitCode})` : ""}`,
-    `  url:      ${s.url ?? "-"}`,
+    ...(s.machine ? [`  machine:  ${s.machine} (${s.machineState}${s.stale ? "; this is the last known state" : ""}), id there ${s.remoteId}`] : []),
+    `  url:      ${s.url ?? "-"}${s.machine && s.remoteUrl ? ` (${s.remoteUrl} on ${s.machine})` : ""}`,
+    ...(s.machine && s.localHostname ? [`  here:     ${s.customUrl ?? `${s.localHostname} (when it's running and forwarded)`}`] : []),
     ...(s.hostname ? [`  hostname: ${s.customUrl ?? `${s.hostname} (proxy not running)`}${s.url ? ` → ${s.url.replace("http://", "")}` : " (server not running)"}`] : []),
     `  ports:    ${s.ports.join(", ") || "-"}${s.port ? ` (assigned PORT=${s.port})` : ""}`,
     `  pid:      ${active ? s.pid : "-"}`,
@@ -336,7 +374,7 @@ export async function opLogs(a: {
   return { ok: true, text, data: r };
 }
 
-function table(rows: string[][]): string {
+export function table(rows: string[][]): string {
   const widths = rows[0].map((_, i) => Math.max(...rows.map((r) => r[i].length)));
   return rows
     .map((r) =>
