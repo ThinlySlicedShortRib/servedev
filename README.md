@@ -114,9 +114,10 @@ servedev remote add pc me@100.68.42.78   # another computer running servedev (e.
 servedev ls --all                        # its servers too: pc/demo:api
 servedev logs api --on pc -f             # --on <machine>, or pc/<name> anywhere a name goes
 curl http://api.pc.localhost:7780        # its ports, forwarded here
+servedev start web --on pc --dir '~/code/app' -- npm run dev   # a new server there, defined on pc
 ```
 
-This servedev becomes a hub: it keeps one SSH connection per machine and talks to that machine's own servedev through it, forwarding the ports its servers listen on. Machines show as connected, reconnecting or offline (with their last known servers). See [docs/remote.md](docs/remote.md), including starting servedev when a Windows PC boots.
+This servedev becomes a hub: it keeps one SSH connection per machine and talks to that machine's own servedev through it, forwarding the ports its servers listen on. Machines show as connected, reconnecting or offline (with their last known servers). New servers can be created on a machine from the CLI, the dashboard's New server dialog (pick the machine, browse its folders) or agents (`start_server` with `machine` and `dir`). See [docs/remote.md](docs/remote.md), including starting servedev when a Windows PC boots.
 
 ### servedev.json (optional)
 
