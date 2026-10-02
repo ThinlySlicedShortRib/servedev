@@ -618,7 +618,9 @@ export function resolveConfig(store: ConfigStore): Resolved {
   // Profiles.
   const profiles: ProfileView[] = [];
   const grids = new Map<string, GridTile[]>();
-  const draft = validTiles(local.grid).filter((t) => servers.has(t.i));
+  // The unsaved grid can also show another machine's servers ("pc/<id>"); profiles can't yet.
+  const machineNames = new Set(Object.keys(isObject(local.machines) ? local.machines : {}));
+  const draft = validTiles(local.grid).filter((t) => servers.has(t.i) || machineNames.has(t.i.slice(0, Math.max(0, t.i.indexOf("/")))));
   if (draft.length) grids.set("draft", draft);
 
   for (const info of projects.values()) {

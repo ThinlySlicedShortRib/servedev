@@ -284,3 +284,18 @@ test("migration: credentials on a command line don't move into config.json", () 
   expect(report.notes.join("\n")).toContain("--token");
   st.close();
 });
+
+test("resolve: the unsaved grid keeps tiles of a configured machine's servers, and drops other unknown ones", () => {
+  const root = repo({ servers: { api: { command: "a" } } });
+  const s = store({
+    projects: { app: { path: root } },
+    machines: { pc: { ssh: "me@100.64.0.2" } },
+    grid: [
+      { i: "app:api", x: 0, y: 0, w: 6, h: 9 },
+      { i: "pc/demo:api", x: 6, y: 0, w: 6, h: 9 },
+      { i: "nas/photos:web", x: 0, y: 9, w: 6, h: 9 },
+      { i: "app:gone", x: 6, y: 9, w: 6, h: 9 },
+    ],
+  });
+  expect(resolveConfig(s).grids.get("draft")?.map((t) => t.i)).toEqual(["app:api", "pc/demo:api"]);
+});
