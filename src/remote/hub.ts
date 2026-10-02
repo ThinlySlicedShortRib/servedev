@@ -7,7 +7,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { ACTIVE, type PublicServer } from "../manager";
 import type { Route } from "../proxy";
-import type { RemoteApi } from "./api";
+import { RemoteApiError, type RemoteApi } from "./api";
 import { RefError, assertMachineName, remoteId, resolveRemoteRef, splitRef } from "./ids";
 import { Machine, type MachineDeps } from "./machine";
 import { assertRemotePath, isMissingEndpoint, remoteStartBody, tooOld } from "./create";
@@ -276,12 +276,15 @@ export class RemoteHub extends EventEmitter {
     return this.rewrite(m, data);
   }
 
-  /** A folder on a machine, as the "new server" dialog needs it, plus where a server there opens here. */
+  /**
+   * A folder on a machine, as the "new server" dialog needs it, plus where a server there opens
+   * here: urlTemplate with {host} for its hub hostname (web.pc.localhost); absent without the proxy.
+   */
   async inspect(machine: string, dir: string): Promise<Record<string, unknown>> {
     const m = this.get(machine);
     const path = assertRemotePath(m.name, dir);
     const data = await m.liveApi().call<Record<string, unknown>>("GET", `/api/inspect?${new URLSearchParams({ dir: path })}`);
-    return { ...data, machine: m.name, urlTemplate: this.deps.urlFor(`{host}.${m.name}.localhost`) };
+    return { ...data, machine: m.name, urlTemplate: this.deps.urlFor("{host}") };
   }
 
   /** A machine's /api/dirs; an older servedev there gets a clear "update it" instead of a 404. */
@@ -293,6 +296,7 @@ export class RemoteHub extends EventEmitter {
       return { ...(await m.liveApi().call<Record<string, unknown>>("GET", `/api/dirs?${q}`)), machine: m.name };
     } catch (e) {
       if (isMissingEndpoint(e)) throw tooOld(m.name, m.version, this.deps.hubVersion, "list its folders (type the path instead)");
+      if (e instanceof RemoteApiError && e.status < 500) throw new RemoteApiError(e.status, `${e.message} on ${m.name}`);
       throw e;
     }
   }

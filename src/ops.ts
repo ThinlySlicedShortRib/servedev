@@ -77,6 +77,11 @@ export function describeRun(r: RunInfo): string {
   return `run #${r.id}, started ${ago(r.startedAt)} ago, ${end}`;
 }
 
+/** How the CLI names a server: "api", or "api --on pc" for another machine's. */
+function cliName(s: AnyServer): string {
+  return s.machine ? `${s.name} --on ${s.machine}` : s.name;
+}
+
 function where(s: AnyServer) {
   const here = s.customUrl ? ` at ${s.customUrl}${s.url ? ` (→ ${s.url.replace("http://", "")})` : ""}` : s.url ? ` at ${s.url}` : "";
   if (!s.machine) return here;
@@ -392,7 +397,7 @@ export async function opStatus(a: { cwd: string; name?: string }): Promise<OpRes
         ]
       : []),
     ...(runs.length > 1
-      ? ["", "Earlier runs (read with: servedev logs " + s.name + " --run <id>):", ...runs.filter((x) => !x.current).map((x) => `  ${describeRun(x)}`)]
+      ? ["", "Earlier runs (read with: servedev logs " + cliName(s) + " --run <id>):", ...runs.filter((x) => !x.current).map((x) => `  ${describeRun(x)}`)]
       : []),
     "",
     "Recent logs:",
@@ -521,7 +526,7 @@ export async function opRuns(a: { cwd: string; name?: string; limit?: number }):
   const text =
     `${r.server.id}: ${r.runs.length} run${r.runs.length === 1 ? "" : "s"} (* current). Logs are kept ${r.retentionDays} days after a run stops.\n` +
     table(rows) +
-    `\nRead one with: servedev logs ${r.server.name} --run <id>`;
+    `\nRead one with: servedev logs ${cliName(r.server)} --run <id>`;
   return { ok: true, text, data: r };
 }
 
@@ -845,10 +850,10 @@ export async function opInspect(a: { cwd: string; path?: string; machine?: strin
     r.detected ? `Detected command: ${r.detected.command} (from the ${r.detected.kind})` : "No dev script detected; pass a command to start_server.",
     r.install ? `Dependencies: ${r.install.detail} Install would run ${r.install.command.split(" --")[0]} in ${r.install.dir} (${r.install.reason}).` : "",
     r.configured?.length ? `Defined in servedev.json: ${r.configured.map((c: any) => `${c.name} (${c.command})`).join(", ")}` : "",
-    r.existing?.length ? `Already known here: ${r.existing.map((e: any) => `${e.name} (${e.status})`).join(", ")}` : "",
+    r.existing?.length ? `Already known ${a.machine ? `on ${a.machine}` : "here"}: ${r.existing.map((e: any) => `${e.name} (${e.status})`).join(", ")}` : "",
     `Suggested name: ${r.suggestedName}`,
     a.machine
-      ? `Start it there: start_server with machine "${a.machine}", dir "${r.dir}" (servedev start <name> --on ${a.machine} --dir ${r.dir} [-- <command>]). It opens here at ${(r.urlTemplate ?? "http://{host}").replace("{host}", hostLabel(r.suggestedName))}.`
+      ? `Start it there: start_server with machine "${a.machine}", dir "${r.dir}" (servedev start <name> --on ${a.machine} --dir ${r.dir} [-- <command>]). It opens here at ${(r.urlTemplate ?? "http://{host}").replace("{host}", `${hostLabel(r.suggestedName)}.${a.machine}.localhost`)}.`
       : "",
   ].filter(Boolean);
   return { ok: true, text: lines.join("\n"), data: r };

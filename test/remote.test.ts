@@ -595,7 +595,7 @@ test("hub: creating a server in a folder on a machine; the answer comes back wit
 
 test("hub: inspecting a folder on a machine says where its server would open here", async () => {
   const { hub } = hubWithRemote();
-  expect(await hub.inspect("pc", "~/code/app")).toMatchObject({ dir: "/home/pc/code/app", exists: true, project: "code", machine: "pc", urlTemplate: "http://{host}.pc.localhost:7780" });
+  expect(await hub.inspect("pc", "~/code/app")).toMatchObject({ dir: "/home/pc/code/app", exists: true, project: "code", machine: "pc", urlTemplate: "http://{host}:7780" });
   await expect(hub.inspect("pc", "code/app")).rejects.toThrow(/absolute path/);
 });
 

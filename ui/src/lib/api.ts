@@ -354,6 +354,25 @@ export interface Inspection {
   tracked?: boolean
   /** Shared profiles in the repo's servedev.json. */
   profiles?: string[]
+  /** Inspected on another machine (paths are that machine's). */
+  machine?: string
+  /** Where a server there opens here, with {host} for its hub hostname (web.pc.localhost): "http://{host}:7780". */
+  urlTemplate?: string
+}
+
+/** Subfolders of a folder (GET /api/dirs), with what they hold; never files. */
+export interface DirListing {
+  path: string
+  parent?: string
+  home: string
+  package?: boolean
+  servedev?: boolean
+  git?: boolean
+  dirs: { name: string; path: string; link?: boolean; package?: boolean; servedev?: boolean; git?: boolean }[]
+  /** Dot-folders and node_modules left out. */
+  hidden: number
+  truncated?: boolean
+  machine?: string
 }
 
 /** A tile in the dashboard grid (server id, grid position and size, and what it shows). */

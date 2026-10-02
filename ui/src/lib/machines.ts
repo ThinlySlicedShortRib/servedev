@@ -140,3 +140,40 @@ export function suggestMachineName(ssh: string): string {
 
 /** Machine names become part of ids and hostnames (api.pc.localhost). Mirrors the daemon's rule. */
 export const MACHINE_NAME = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/
+
+// ---------------------------------------------------------------------------------------------
+// New servers on another machine
+// ---------------------------------------------------------------------------------------------
+
+/** A DNS label from a server or project name, as the hub makes them: "API_v2" -> "api-v2". */
+export function hostLabel(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 63) || "server"
+  )
+}
+
+/**
+ * The hub hostname a new server on a machine gets: <server>.<machine>.localhost, or with its
+ * project in it when another project there already uses the name (as the hub names them).
+ */
+export function remoteHostname(machine: string, name: string, project: string | undefined, servers: Iterable<Server>): string {
+  const label = hostLabel(name)
+  const clash = [...servers].some((s) => s.machine === machine && hostLabel(s.name) === label && s.project !== project)
+  return clash && project ? `${label}.${hostLabel(project)}.${machine}.localhost` : `${label}.${machine}.localhost`
+}
+
+/** Why a path can't be a folder on another machine (relative paths would depend on its daemon). */
+export function remotePathProblem(path: string, machine: string): string | undefined {
+  const p = path.trim()
+  if (!p || p.startsWith("/") || p === "~" || p.startsWith("~/")) return undefined
+  return `Use a full path on ${machine} (/…), or one in its home folder (~/…).`
+}
+
+/** Why a machine can't take a new server right now; undefined when it can. */
+export function unavailableReason(m: Machine, now = Date.now()): string | undefined {
+  return m.state === "connected" ? undefined : stateSentence(m, now)
+}

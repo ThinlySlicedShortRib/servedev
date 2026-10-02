@@ -2,7 +2,8 @@ import { expect, test } from "bun:test"
 
 import type { Machine, Server } from "../ui/src/lib/api"
 import { filterGroups, groupEntries, viewEntries } from "../ui/src/lib/entries"
-import { localPortOf, machineKind, machineSections, remotePortOf, suggestMachineName, worstState } from "../ui/src/lib/machines"
+import { hostLabel, localPortOf, machineKind, machineSections, remoteHostname, remotePathProblem, remotePortOf, suggestMachineName, unavailableReason, worstState } from "../ui/src/lib/machines"
+import { hostAliases, hostLabel as hubHostLabel } from "../src/remote/ids"
 
 function server(id: string, status: Server["status"], extra: Partial<Server> = {}): Server {
   const [, project, name] = /^(?:[\w-]+\/)?([^:]+):(.+)$/.exec(id)!
@@ -92,4 +93,25 @@ test("machine labels, names and the header dot", () => {
   expect(worstState([machine("a"), machine("b", { state: "offline" })])).toBe("offline")
   expect(worstState([machine("a", { state: "reconnecting" }), machine("b", { state: "offline" })])).toBe("reconnecting")
   expect(worstState([machine("a")])).toBeNull()
+})
+
+test("new server on a machine: the hostname it gets here matches the hub's", () => {
+  for (const n of ["web", "API_v2", "my docs", "--x--", ""]) expect(hostLabel(n)).toBe(hubHostLabel(n))
+  const list = [server("pc/demo:api", "running", { machine: "pc" }), server("demo:web", "running")]
+  expect(remoteHostname("pc", "web", "shop", list)).toBe("web.pc.localhost")
+  // Another project there has an "api": both get their project in the name, as the hub does.
+  expect(remoteHostname("pc", "api", "shop", list)).toBe("api.shop.pc.localhost")
+  expect(hostAliases("pc", [{ id: "demo:api", name: "api", project: "demo" }, { id: "shop:api", name: "api", project: "shop" }]).get("shop:api")).toBe("api.shop.pc.localhost")
+  // The same server again keeps its plain name.
+  expect(remoteHostname("pc", "api", "demo", list)).toBe("api.pc.localhost")
+})
+
+test("new server on a machine: paths there must be absolute or under ~; only connected machines can take one", () => {
+  expect(remotePathProblem("~/code/app", "pc")).toBeUndefined()
+  expect(remotePathProblem("/mnt/c/code", "pc")).toBeUndefined()
+  expect(remotePathProblem("", "pc")).toBeUndefined()
+  expect(remotePathProblem("code/app", "pc")).toMatch(/full path on pc/)
+  expect(unavailableReason(machine("pc"))).toBeUndefined()
+  expect(unavailableReason(machine("pc", { state: "reconnecting", attempt: 2 }))).toBe("reconnecting (attempt 2)…")
+  expect(unavailableReason(machine("pc", { state: "offline" }))).toBe("offline")
 })

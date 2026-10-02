@@ -418,7 +418,7 @@ export function App() {
           )
         )}
       </SidebarInset>
-      <NewServerDialog open={creating} onOpenChange={setCreating} onStarted={select} />
+      <NewServerDialog open={creating} onOpenChange={setCreating} onStarted={select} servers={servers} />
       <SaveGridDialog
         open={savingGrid}
         onOpenChange={setSavingGrid}

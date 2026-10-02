@@ -20,8 +20,14 @@ import {
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet, FieldLegend } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText } from "@/components/ui/input-group"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { FolderBrowser } from "@/components/folder-browser"
+import { MachineIcon } from "@/components/machine-ui"
+import { useMachines } from "@/hooks/use-machines"
 import { api, type Inspection, type Server } from "@/lib/api"
+import { machineKind, remoteHostname, remotePathProblem, unavailableReason } from "@/lib/machines"
 
 const NAME_RE = /^[\w.-]+$/
 
@@ -29,12 +35,24 @@ export function NewServerDialog({
   open,
   onOpenChange,
   onStarted,
+  servers,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onStarted: (id: string) => void
+  /** Every server (for the hostname a new one on another machine gets). */
+  servers?: Map<string, Server>
 }) {
   const friendly = useStyleId() === "friendly"
+  const machines = useMachines()
+  /** "" is this machine; otherwise another machine's name. */
+  const [machineName, setMachineName] = React.useState("")
+  const machine = machines.get(machineName || undefined)
+  const remote = machine?.name
+  const remoteDown = machine ? unavailableReason(machine) : undefined
+  const [browsing, setBrowsing] = React.useState(false)
+  /** No native picker here: browse this machine's folders in the popover instead. */
+  const [localBrowser, setLocalBrowser] = React.useState(false)
   const [dir, setDir] = React.useState("")
   const [info, setInfo] = React.useState<Inspection | null>(null)
   const [inspecting, setInspecting] = React.useState(false)
@@ -68,6 +86,8 @@ export function NewServerDialog({
 
   React.useEffect(() => {
     if (!open) return
+    setMachineName("")
+    setBrowsing(false)
     setDir("")
     setInfo(null)
     setName("")
@@ -79,18 +99,32 @@ export function NewServerDialog({
     touched.current = { name: false, command: false, install: false }
   }, [open])
 
-  // Inspect the folder as the path is typed or picked.
+  function chooseMachine(name: string) {
+    if (name === machineName) return
+    setMachineName(name)
+    setDir("")
+    setInfo(null)
+    setError(null)
+    setBrowsing(false)
+    touched.current = { name: false, command: false, install: false }
+  }
+
+  const pathProblem = remote ? remotePathProblem(dir, remote) : undefined
+
+  // Inspect the folder as the path is typed or picked (on the chosen machine).
   React.useEffect(() => {
     const path = dir.trim()
-    if (!path) {
+    if (!path || pathProblem || remoteDown) {
       setInfo(null)
+      setInspecting(false)
       return
     }
     let cancelled = false
     setInspecting(true)
+    setError(null)
     const t = setTimeout(async () => {
       try {
-        const res = await api<Inspection>(`/api/inspect?${new URLSearchParams({ dir: path })}`)
+        const res = await api<Inspection>(`/api/inspect?${new URLSearchParams({ dir: path, ...(remote ? { machine: remote } : {}) })}`)
         if (cancelled) return
         setInfo(res)
         if (res.exists) {
@@ -108,7 +142,13 @@ export function NewServerDialog({
       cancelled = true
       clearTimeout(t)
     }
-  }, [dir])
+  }, [dir, remote, pathProblem, remoteDown])
+
+  function pickFromBrowser(path: string) {
+    touched.current = { name: false, command: false, install: false }
+    setDir(path)
+    setBrowsing(false)
+  }
 
   async function browse() {
     setPicking(true)
@@ -120,7 +160,11 @@ export function NewServerDialog({
         setDir(res.path)
       }
     } catch (e) {
-      setError((e as Error).message)
+      // No native picker on this system: browse its folders here instead.
+      if (/no native folder picker/.test((e as Error).message)) {
+        setLocalBrowser(true)
+        setBrowsing(true)
+      } else setError((e as Error).message)
     } finally {
       setPicking(false)
     }
@@ -146,21 +190,27 @@ export function NewServerDialog({
   const portValid = !portValue || portValue === "auto" || (/^\d+$/.test(portValue) && +portValue > 0 && +portValue < 65536)
   const nameValid = NAME_RE.test(name)
   const nameTaken = ready && info.existing?.find((s) => s.name === name)
-  const canSubmit = ready && nameValid && portValid && command.trim() !== "" && !submitting
+  const canSubmit = ready && nameValid && portValid && command.trim() !== "" && !submitting && !remoteDown
+  /** Where a server on the chosen machine opens here. */
+  const openAt =
+    remote && ready && nameValid
+      ? info.urlTemplate?.replace("{host}", remoteHostname(remote, name, info.project, servers?.values() ?? []))
+      : undefined
+  // The folder there; the hub looks it up again and runs the server in it.
+  const where = (folder: string) => (remote ? { machine: remote, dir: folder } : { root: info?.root, clientCwd: folder })
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!canSubmit || !info) return
     void start(
       {
-        root: info.root,
-        clientCwd: info.dir,
+        ...where(info.dir),
         name,
         // Leave the detected command to the daemon so it can add framework port flags.
         command: command.trim() === info.detected?.command ? undefined : command.trim(),
         port: !portValue ? undefined : portValue === "auto" ? "auto" : Number(portValue),
         install: install || undefined,
-        hostname: hostname.trim() || undefined,
+        hostname: remote ? undefined : hostname.trim() || undefined,
       },
       "new"
     )
@@ -176,47 +226,120 @@ export function NewServerDialog({
             </span>
           )}
           <DialogTitle>New dev server</DialogTitle>
-          <DialogDescription>Choose a project folder. servedev works out how to start it, and you can adjust that before it runs.</DialogDescription>
+          <DialogDescription>
+            {remote
+              ? `Choose a project folder on ${remote}. servedev there works out how to start it, and the server is defined and runs on ${remote}.`
+              : "Choose a project folder. servedev works out how to start it, and you can adjust that before it runs."}
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="flex flex-col gap-6">
           <FieldGroup>
-            <Field data-invalid={info && !info.exists ? true : undefined}>
-              <FieldLabel htmlFor="ns-dir">Folder</FieldLabel>
+            {machines.hasRemotes && (
+              <Field>
+                <FieldLabel htmlFor="ns-machine">Machine</FieldLabel>
+                <Select
+                  items={[{ value: "", label: machines.localName }, ...machines.list.map((m) => ({ value: m.name, label: m.name }))]}
+                  value={machineName}
+                  onValueChange={(v) => chooseMachine(String(v ?? ""))}
+                >
+                  <SelectTrigger id="ns-machine" className="w-full" aria-label="Machine to run the server on">
+                    <SelectValue>
+                      {(v: string) => (
+                        <>
+                          <MachineIcon machine={machines.get(v || undefined)} className="size-4 text-muted-foreground" />
+                          {v || machines.localName}
+                        </>
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">
+                      <MachineIcon className="size-4 text-muted-foreground" />
+                      {machines.localName}
+                    </SelectItem>
+                    {machines.list.map((m) => {
+                      const why = unavailableReason(m)
+                      return (
+                        <SelectItem key={m.name} value={m.name} disabled={!!why}>
+                          <MachineIcon machine={m} className="size-4 text-muted-foreground" />
+                          {m.name}
+                          <span className="text-muted-foreground">{why ?? machineKind(m)}</span>
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+                {remoteDown ? (
+                  <FieldError>
+                    {remote} is {remoteDown}. Pick another machine, or wait until it's back.
+                  </FieldError>
+                ) : remote ? (
+                  <FieldDescription>
+                    Runs on {remote}
+                    {machine && machineKind(machine) ? ` (${machineKind(machine)})` : ""} with its own servedev; you reach it from here.
+                  </FieldDescription>
+                ) : null}
+              </Field>
+            )}
+            <Field data-invalid={(info && !info.exists) || pathProblem ? true : undefined}>
+              <FieldLabel htmlFor="ns-dir">{remote ? `Folder on ${remote}` : "Folder"}</FieldLabel>
               <InputGroup>
                 <InputGroupInput
                   id="ns-dir"
                   value={dir}
                   onChange={(e) => setDir(e.target.value)}
-                  placeholder="~/code/my-app"
+                  placeholder={remote && machine?.kind === "wsl" ? "~/code/my-app or /mnt/c/…" : "~/code/my-app"}
                   className="font-mono"
                   autoComplete="off"
                   spellCheck={false}
                   autoFocus
-                  aria-invalid={info && !info.exists ? true : undefined}
+                  aria-invalid={(info && !info.exists) || pathProblem ? true : undefined}
                 />
                 <InputGroupAddon align="inline-end">
                   {inspecting && !picking && <Spinner />}
-                  <Hint label="Open the macOS folder picker to choose the project folder">
-                  <InputGroupButton onClick={browse} disabled={picking}>
-                    {picking ? <Spinner /> : <FolderOpenIcon />}
-                    {picking ? "Waiting…" : "Browse…"}
-                  </InputGroupButton>
-                  </Hint>
+                  {remote || localBrowser ? (
+                    <Popover open={browsing} onOpenChange={setBrowsing}>
+                      <PopoverTrigger
+                        render={
+                          <InputGroupButton disabled={!!remoteDown} aria-label={remote ? `Browse folders on ${remote}` : "Browse folders"}>
+                            <FolderOpenIcon />
+                            Browse…
+                          </InputGroupButton>
+                        }
+                      />
+                      <PopoverContent align="end" className="w-80">
+                        <FolderBrowser key={`${remote ?? ""}`} machine={remote} start={info?.exists ? info.dir : dir || undefined} onPick={pickFromBrowser} />
+                      </PopoverContent>
+                    </Popover>
+                  ) : (
+                    <Hint label="Open the macOS folder picker to choose the project folder">
+                      <InputGroupButton onClick={browse} disabled={picking}>
+                        {picking ? <Spinner /> : <FolderOpenIcon />}
+                        {picking ? "Waiting…" : "Browse…"}
+                      </InputGroupButton>
+                    </Hint>
+                  )}
                 </InputGroupAddon>
               </InputGroup>
-              {info && !info.exists ? (
-                <FieldError>No folder at {info.dir}.</FieldError>
+              {pathProblem ? (
+                <FieldError>{pathProblem}</FieldError>
+              ) : info && !info.exists ? (
+                <FieldError>
+                  No folder at {info.dir}
+                  {remote ? ` on ${remote}` : ""}.
+                </FieldError>
               ) : ready ? (
                 <FieldDescription>
                   Project <span className="font-medium text-foreground">{info.project}</span>
-                  {info.root !== info.dir && <> (root {tildify(info.root!)})</>}.
+                  {info.root !== info.dir && <> (root {tildify(info.root!)})</>}
+                  {remote ? ` on ${remote}` : ""}.
                 </FieldDescription>
               ) : (
-                <FieldDescription>Type a path or browse for a folder on this machine.</FieldDescription>
+                <FieldDescription>{remote ? `Type a path on ${remote} or browse its folders.` : "Type a path or browse for a folder on this machine."}</FieldDescription>
               )}
             </Field>
 
-            {ready && !info.tracked && ((info.configured?.length ?? 0) > 0 || (info.profiles?.length ?? 0) > 0) && (
+            {ready && !remote && !info.tracked && ((info.configured?.length ?? 0) > 0 || (info.profiles?.length ?? 0) > 0) && (
               <Alert>
                 <AlertTitle>This repo has a servedev.json</AlertTitle>
                 <AlertDescription className="flex flex-col items-start gap-2">
@@ -247,7 +370,7 @@ export function NewServerDialog({
                         size="sm"
                         variant="outline"
                         disabled={!!submitting}
-                        onClick={() => start({ root: info.root, clientCwd: info.root, name: c.name }, c.name)}
+                        onClick={() => start({ ...where(info.root!), name: c.name }, c.name)}
                       >
                         {submitting === c.name ? <Spinner data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}
                         {c.status === "running" ? "Show" : "Start"}
@@ -276,6 +399,17 @@ export function NewServerDialog({
                   ) : nameTaken ? (
                     <FieldDescription>
                       {info.project} already has a server called {name} ({nameTaken.status}). Starting reuses it.
+                    </FieldDescription>
+                  ) : remote ? (
+                    <FieldDescription>
+                      Unique within {info.project}; agents refer to it as {remote}/{name}.{" "}
+                      {openAt ? (
+                        <>
+                          Opens here at <span className="font-mono text-foreground">{openAt}</span>.
+                        </>
+                      ) : (
+                        "Its port is forwarded here while it runs."
+                      )}
                     </FieldDescription>
                   ) : (
                     <FieldDescription>Unique within {info.project}; agents refer to it by this name.</FieldDescription>
@@ -316,6 +450,7 @@ export function NewServerDialog({
                     <FieldError>Enter a port between 1 and 65535, or auto.</FieldError>
                   )}
                 </Field>
+                {!remote && (
                 <Field>
                   <FieldLabel htmlFor="ns-hostname">Custom URL (optional)</FieldLabel>
                   <InputGroup>
@@ -334,6 +469,7 @@ export function NewServerDialog({
                   </InputGroup>
                   <FieldDescription>Reach it at a name instead of a port. Names ending in .localhost work without any setup.</FieldDescription>
                 </Field>
+                )}
                 {info.install && (
                   <Field orientation="horizontal">
                     <Checkbox
@@ -370,7 +506,7 @@ export function NewServerDialog({
             <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
             <Button type="submit" disabled={!canSubmit}>
               {submitting === "new" && <Spinner data-icon="inline-start" />}
-              Start server
+              {remote ? `Start on ${remote}` : "Start server"}
             </Button>
           </DialogFooter>
         </form>
