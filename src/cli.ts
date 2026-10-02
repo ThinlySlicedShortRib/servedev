@@ -68,20 +68,21 @@ Usage:
                                             write the server into its repo's servedev.json (shared through git)
   servedev rm <name>                        stop and forget a server
   servedev remove-project [path]            stop and forget every server in a project folder (files stay)
-  servedev pin <name> / unpin <name>        pinned servers stay on top and start at login
+  servedev pin <name> / unpin <name>        pinned servers stay on top and start at login (pc/<name>: pinned on pc, starts there)
   servedev hostname [name] [host|--clear]   custom URL like http://keel.localhost (proxied to the real port)
   servedev cleanup                          stop hung servers: ones still running from deleted folders (e.g. removed worktrees)
   servedev autostart [on|off]               the login item that starts pinned servers
   servedev add [path]                       track a folder: its servedev.json's servers and shared profiles appear
-  servedev profile [ls]                     profiles: yours (any servers) and shared ones from repos' servedev.json
+  servedev profile [ls]                     profiles: yours (any servers, any machine) and shared ones from repos' servedev.json
   servedev profile create <profile> [servers...] [--running] [--shared [--project p]]
+                                            servers here or on other machines: web pc/api (pc/demo:api)
   servedev profile share <profile>          move one of yours into its repo's servedev.json (commit to share)
   servedev profile duplicate <profile> [new-name]   copy a shared profile as one of yours
   servedev profile skip <shared profile> [servers...]   servers of a shared profile you don't start
   servedev profile needs <shared profile> gcloud.project=<id>   what its servers need (no personal accounts)
   servedev profile add|remove <profile> <servers...>
   servedev profile rename <profile> <new-name>
-  servedev profile start <profile>          start its servers in order (others keep running)
+  servedev profile start <profile>          start its servers in order, each on its machine (others keep running)
   servedev profile delete <profile>
   servedev profile accounts <profile> gcloud.account=me@x.com [gcloud.project=p] [github=none]
                                             accounts this profile's servers use instead of the machine's
@@ -355,7 +356,7 @@ async function main() {
       break;
     case "pin":
     case "unpin":
-      result = await opPin({ cwd, name: args[0], pinned: cmd === "pin" });
+      result = await opPin({ cwd, name: on(args[0]), pinned: cmd === "pin" });
       break;
     case "autostart":
       if (args[0] && !["on", "off"].includes(args[0])) throw new Error("usage: servedev autostart [on|off]");

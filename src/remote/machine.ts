@@ -6,6 +6,7 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
+import type { ProfileView } from "../config";
 import type { PublicServer } from "../manager";
 import { RemoteApi, RemoteApiError } from "./api";
 import { TARGETS, chooseLocalPort, diffForwards, systemPorts, wantedPorts, type PortProbe, type Target } from "./forwards";
@@ -37,6 +38,7 @@ interface Cache {
   version?: string;
   remotePort?: number;
   servers?: PublicServer[];
+  profiles?: ProfileView[];
 }
 
 const HEALTH_EVERY = 15_000;
@@ -45,6 +47,8 @@ export class Machine extends EventEmitter {
   status: ConnStatus;
   /** Remote id -> the server as its machine last reported it. */
   readonly servers = new Map<string, PublicServer>();
+  /** Its profiles as it last reported them (its own ids). */
+  profiles: ProfileView[] = [];
   /** Remote port -> its forward here, and the loopback address it reaches there. */
   readonly forwards = new Map<number, { localPort: number; target: Target }>();
   /** Server id -> hub hostname (api.pc.localhost). */
@@ -83,6 +87,7 @@ export class Machine extends EventEmitter {
     this.version = cache.version;
     this.remotePort = cache.remotePort;
     for (const s of cache.servers ?? []) this.servers.set(s.id, s);
+    this.profiles = Array.isArray(cache.profiles) ? cache.profiles : [];
     this.aliases = hostAliases(name, [...this.servers.values()]);
     this.status = initial(cache.lastSeen);
   }
@@ -299,7 +304,10 @@ export class Machine extends EventEmitter {
     } catch {
       return;
     }
-    if (event === "snapshot" && Array.isArray(payload.servers)) this.replaceServers(payload.servers);
+    if (event === "snapshot" && Array.isArray(payload.servers)) {
+      this.replaceServers(payload.servers);
+      if (Array.isArray(payload.profiles)) this.replaceProfiles(payload.profiles);
+    } else if (event === "profiles" && Array.isArray(payload)) this.replaceProfiles(payload);
     else if (event === "server" && payload?.id) {
       this.servers.set(payload.id, payload);
       this.serversChanged([payload.id]);
@@ -330,6 +338,13 @@ export class Machine extends EventEmitter {
     }
     for (const s of list) this.servers.set(s.id, s);
     this.serversChanged(list.map((s) => s.id));
+  }
+
+  private replaceProfiles(list: ProfileView[]) {
+    if (JSON.stringify(list) === JSON.stringify(this.profiles)) return;
+    this.profiles = list;
+    this.emit("profiles");
+    this.saveSoon();
   }
 
   private serversChanged(ids: string[]) {
@@ -376,6 +391,8 @@ export class Machine extends EventEmitter {
   }
 
   dispose() {
+    // What it saw last is kept for next time (e.g. the machine's entry was edited and it's recreated).
+    if (this.saveTimer) this.save();
     this.disposed = true;
     clearTimeout(this.retryTimer);
     clearTimeout(this.saveTimer);
@@ -499,7 +516,7 @@ export class Machine extends EventEmitter {
 
   save() {
     if (this.disposed) return;
-    const cache: Cache = { lastSeen: this.status.lastSeen, os: this.os, version: this.version, remotePort: this.remotePort, servers: [...this.servers.values()] };
+    const cache: Cache = { lastSeen: this.status.lastSeen, os: this.os, version: this.version, remotePort: this.remotePort, servers: [...this.servers.values()], profiles: this.profiles };
     try {
       fs.mkdirSync(this.deps.dir, { recursive: true, mode: 0o700 });
       const tmp = `${this.cachePath()}.${process.pid}.tmp`;

@@ -57,11 +57,15 @@ const machineProp = {
     description: 'Another machine whose servedev this one relays (see list_machines), e.g. "pc"; `name` is then a server there. Same as giving the id as "pc/<id>".',
   },
 };
-const serverList = { type: "array", items: { type: "string" }, description: 'Server names (in this project) or ids like "keel-review:dev".' };
+const serverList = {
+  type: "array",
+  items: { type: "string" },
+  description: 'Server names (in this project) or ids like "keel-review:dev"; another machine\'s as "pc/demo:api" (or "pc/api" when the name is unique there).',
+};
 const profileRef = {
   type: "string",
   description:
-    'Profile name (case-insensitive), or its id from list_profiles: "local:<name>" for the user\'s own, "<project>:<name>" for one shared in a repo\'s servedev.json (needed when several worktrees share one by the same name).',
+    'Profile name (case-insensitive), or its id from list_profiles: "local:<name>" for the user\'s own, "<project>:<name>" for one shared in a repo\'s servedev.json (needed when several worktrees share one by the same name), "pc/<project>:<name>" for one shared in a repo on another machine.',
 };
 const gridProfile = {
   type: "string",
@@ -70,8 +74,8 @@ const gridProfile = {
 const accountPicks = {
   type: "object",
   description:
-    'Accounts the profile\'s servers use instead of this machine\'s, by provider id then field, e.g. {"gcloud": {"account": "me@x.com", "project": "my-proj"}, "github": {"user": "me"}}. ' +
-    "A provider set to null goes back to this machine's accounts. Providers and fields are listed by list_accounts.",
+    'Accounts the profile\'s servers on this machine use instead of this machine\'s, by provider id then field, e.g. {"gcloud": {"account": "me@x.com", "project": "my-proj"}, "github": {"user": "me"}}. ' +
+    "A provider set to null goes back to this machine's accounts. Providers and fields are listed by list_accounts. Servers on other machines use the accounts their own machine resolves.",
   additionalProperties: { anyOf: [{ type: "object", additionalProperties: { type: "string" } }, { type: "null" }] },
 };
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, ...(required.length ? { required } : {}) });
@@ -167,7 +171,9 @@ export const TOOLS = [
   },
   {
     name: "pin_server",
-    description: "Pin or unpin a server. Pinned servers sit at the top of the dashboard and start automatically when the user logs in (macOS).",
+    description:
+      "Pin or unpin a server. Pinned servers sit at the top of the dashboard and start automatically when the user logs in (macOS). " +
+      "A server on another machine (pc/...) is pinned on that machine, in its own config: it starts whenever servedev starts there.",
     inputSchema: obj({ name: serverRef, pinned: { type: "boolean", description: "false to unpin (default true)." }, ...cwdProp }, ["name"]),
   },
   {
@@ -269,15 +275,17 @@ export const TOOLS = [
   {
     name: "list_profiles",
     description:
-      "List profiles with their servers in start order. Two kinds: the user's own (in ~/.servedev/config.json, any servers from any project) " +
-      "and shared ones (in a repo's servedev.json, committed for everyone on the repo; one per worktree, tagged with its branch).",
+      "List profiles with their servers in start order. Two kinds: the user's own (in ~/.servedev/config.json, any servers from any project, on this machine or another one) " +
+      "and shared ones (in a repo's servedev.json, committed for everyone on the repo; one per worktree, tagged with its branch). On a hub, profiles shared in repos on " +
+      "another machine are listed too (ids \"pc/<project>:<name>\"); they start that machine's servers.",
     inputSchema: obj({}),
   },
   {
     name: "create_profile",
     description:
-      "Create a profile from servers (in start order), or from whatever is running now. By default it's the user's own; shared=true puts it in the " +
-      "project's servedev.json for the whole team (servers must all be from that project; personal accounts like emails stay out of it). " +
+      "Create a profile from servers (in start order), or from whatever is running now. By default it's the user's own, and it can mix machines " +
+      '(e.g. ["pc/demo:api", "web"]: each starts on its own machine, in order). shared=true puts it in the ' +
+      "project's servedev.json for the whole team (servers must all be from that project on this machine; personal accounts like emails stay out of it). " +
       "To also arrange them on a grid, use set_grid with the profile afterwards.",
     inputSchema: obj(
       {
@@ -337,7 +345,9 @@ export const TOOLS = [
   },
   {
     name: "start_profile",
-    description: "Start every server in a profile, in order, waiting for each. Servers not in the profile keep running.",
+    description:
+      "Start every server in a profile, in order, waiting for each (on whichever machine each is on). Servers not in the profile keep running. " +
+      "Servers on a machine that isn't connected are skipped, and the result says so.",
     inputSchema: obj({ name: profileRef }, ["name"]),
   },
   // ---------- grid ----------
@@ -353,6 +363,7 @@ export const TOOLS = [
     description:
       "Lay out a custom grid, replacing its tiles. Simplest: `servers` plus `columns` (1-4; tiles fill left to right, top to bottom). " +
       "Or give exact `tiles` (x 0-11, w 1-12 with x + w <= 12, y and h in rows of ~44px; a normal tile is 6 wide, 9 high). " +
+      "Servers can be on other machines (pc/...), on the unsaved grid and the user's own profiles' grids; a shared profile's grid holds its own repo's servers. " +
       "For the user's own profile this also sets its servers and start order. For a shared profile it saves the user's own arrangement " +
       "(repo=true instead makes it the default layout in servedev.json for everyone). The dashboard updates live.",
     inputSchema: obj({

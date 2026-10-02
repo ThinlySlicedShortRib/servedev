@@ -39,7 +39,8 @@ import type { Run } from "./store";
 import uiBundle from "../ui/dist/index.html" with { type: "text" };
 import { RemoteHub } from "./remote/hub";
 import { defaultSecretStore } from "./remote/secrets";
-import { assertMachineName } from "./remote/ids";
+import { assertMachineName, remoteId, splitRef } from "./remote/ids";
+import { refsThere, remoteProfileView, withRemoteMembers } from "./remote/profiles";
 import { listDirs } from "./dirs";
 import { BOOT_TASK, bootTaskPowerShell, encodedPowerShell, writeBootScript } from "./remote/boot";
 import { readSse } from "./remote/sse";
@@ -207,8 +208,14 @@ export interface ProfileStartResult {
   id: string;
   ok: boolean;
   alreadyRunning?: boolean;
+  /** Not started: its machine isn't connected (reason says which and why). */
+  skipped?: boolean;
+  /** The other machine it runs on. */
+  machine?: string;
   url?: string;
   reason?: string;
+  /** Worth knowing but not a failure, e.g. which accounts a server on another machine used. */
+  note?: string;
 }
 
 export async function runDaemon(opts: { autostart?: boolean } = {}) {
@@ -289,6 +296,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     const before = JSON.stringify(resolved.profiles) + JSON.stringify([...resolved.grids]);
     const issuesBefore = JSON.stringify(resolved.issues);
     resolved = resolveConfig(config);
+    profileCache = undefined;
     manager.sync(resolved.servers.values());
     // Keep server branch tags in step with a checkout the config noticed.
     for (const info of resolved.projects.values()) {
@@ -415,7 +423,29 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
 
   const accounts = new AccountRegistry();
   await accounts.load();
-  const profiles = () => resolved.profiles;
+  /**
+   * Every profile: yours (with refs to other machines' servers checked against what those machines
+   * report) and this machine's repos' shared ones, then the ones shared in repos on other machines.
+   */
+  let profileCache: ProfileView[] | undefined;
+  const profiles = (): ProfileView[] =>
+    (profileCache ??= [...resolved.profiles.map((p) => withRemoteMembers(p, (name) => hub.lookup(name))), ...hub.profiles()]);
+  // What another machine reports (its servers, its shared profiles, whether it's connected) changes
+  // profiles too; open dashboards get the new list when it does.
+  let lastProfiles = "";
+  let profileCheck: ReturnType<typeof setTimeout> | undefined;
+  function remoteProfilesChanged() {
+    profileCache = undefined;
+    clearTimeout(profileCheck);
+    profileCheck = setTimeout(() => {
+      const list = profiles();
+      const json = JSON.stringify(list);
+      if (json === lastProfiles) return;
+      lastProfiles = json;
+      manager.emit("profiles", list);
+    }, 150);
+  }
+  for (const event of ["server", "remove", "profiles"]) hub.on(event, remoteProfilesChanged);
 
   /** A running server's profile has since picked different accounts (or was deleted): a restart applies them. */
   function accountsStale(s: Server): boolean {
@@ -441,7 +471,12 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   function accountProfile(existing: Server | undefined, req: StartRequest): { profile?: ProfileView; note?: string } {
     const picks = (p?: ProfileView) => (p && Object.keys(p.accounts).length ? p : undefined);
     if (req.profile === null || req.profile === "none") return {};
-    if (req.profile !== undefined) return { profile: picks(profileRef(req.profile)) };
+    if (req.profile !== undefined) {
+      const p = profileRef(req.profile);
+      // Accounts resolve on the machine a server runs on; another machine's profile picks there.
+      if (p.machine) throw new HttpError(400, `${p.name} is a profile on ${p.machine}; its accounts are ${p.machine}'s, so it can't pick accounts for a server here`);
+      return { profile: picks(p) };
+    }
     if (!existing) return {};
     const candidates = profiles().filter((p) => p.servers.includes(existing.id) && picks(p));
     const last = candidates.find((p) => p.id === existing.accounts?.profile.id);
@@ -841,9 +876,15 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     const named = all.filter((p) => p.name.toLowerCase() === key.toLowerCase());
     const mine = named.find((p) => p.kind === "local");
     if (mine) return mine;
-    if (named.length === 1) return named[0];
-    if (named.length > 1) {
-      throw new HttpError(409, `"${key}" is shared in several worktrees; pick one by id: ${named.map((p) => `${p.id}${p.branch ? ` (${p.branch})` : ""}`).join(", ")}`);
+    // This machine's repos first, then other machines'.
+    for (const group of [named.filter((p) => !p.machine), named.filter((p) => p.machine)]) {
+      if (group.length === 1) return group[0];
+      if (group.length > 1) {
+        throw new HttpError(
+          409,
+          `"${key}" is shared in several ${group[0].machine ? "places on other machines" : "worktrees"}; pick one by id: ${group.map((p) => `${p.id}${p.branch ? ` (${p.branch})` : ""}`).join(", ")}`,
+        );
+      }
     }
     throw new HttpError(
       404,
@@ -857,21 +898,63 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     return refs.map((r) => resolveRef(root, String(r), false).id);
   }
 
+  /**
+   * Refs for your profiles and grids: like serverIds, plus other machines' servers ("pc/api" or
+   * "pc/demo:api"), checked against what that machine reports and written as full ids. Refs in
+   * `known` (a profile's current members and missing ones) are taken as written: a server on a
+   * machine that's away, or one that's gone, stays where it is until it's removed on purpose.
+   */
+  function memberIds(root: string | undefined, refs: unknown, known: string[] = []): string[] {
+    if (!Array.isArray(refs)) return [];
+    return refs.map((r) => {
+      if (known.includes(String(r))) return String(r);
+      const found = hub.find(String(r));
+      return found ? remoteId(found.machine.name, found.server.id) : resolveRef(root, String(r), false).id;
+    });
+  }
+
+  /** A shared profile lives in one repo on one machine: another machine's server can't be in it. */
+  function assertNoRemote(ids: string[], what: string) {
+    const remote = ids.filter((id) => splitRef(id));
+    if (remote.length) {
+      throw new HttpError(
+        400,
+        `${remote.join(", ")} ${remote.length === 1 ? "is" : "are"} on another machine; ${what} lives in one repo's servedev.json and starts that machine's servers. Use a profile of your own to mix machines.`,
+      );
+    }
+  }
+
   function profilesChanged() {
-    manager.emit("profiles", profiles());
+    profileCache = undefined;
+    const list = profiles();
+    lastProfiles = JSON.stringify(list);
+    manager.emit("profiles", list);
     // Servers started with a profile's accounts may now be out of date.
     for (const s of manager.list()) if (s.accounts) manager.emit("change", s);
   }
 
   /** Start a profile's servers in order, waiting for each; servers outside the profile are left alone. */
   function startProfile(p: ProfileView, timeout?: number): Promise<ProfileStartResult[]> {
-    return startSequence(p.servers, timeout, p.id);
+    return startSequence(p.servers, timeout, p);
   }
 
-  /** Start servers one after another (each waits for the previous to be ready); running ones are skipped. */
-  async function startSequence(ids: string[], timeout?: number, profile?: string | null): Promise<ProfileStartResult[]> {
+  /**
+   * Start servers one after another, each once the previous one is ready, on whichever machine each
+   * is on (this one through the manager, others through their servedev). Running ones are left as
+   * they are; ones on a machine that isn't connected are skipped, saying so.
+   *
+   * Accounts: a server here gets `profile`'s picks (see StartRequest.profile). A server on another
+   * machine resolves its accounts there: with a profile shared on that machine, that profile's; with
+   * one of yours, its machine's own (your picks name accounts signed in here, so they don't go along).
+   */
+  async function startSequence(ids: string[], timeout?: number, profile?: ProfileView | string | null): Promise<ProfileStartResult[]> {
+    const prof = typeof profile === "string" ? profileRef(profile) : (profile ?? undefined);
     const results: ProfileStartResult[] = [];
     for (const id of ids) {
+      if (splitRef(id)) {
+        results.push(await startRemote(id, timeout, prof));
+        continue;
+      }
       const s = manager.servers.get(id);
       if (!s) continue;
       if (s.status === "running" || s.status === "starting") {
@@ -879,13 +962,84 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         continue;
       }
       try {
-        const r = await start({ id, root: s.root, clientCwd: s.cwd, wait: true, timeout, profile });
-        results.push({ id, ok: !!r.ready?.ok, url: r.server.url, reason: r.ready?.ok ? undefined : r.ready?.reason });
+        const r = await start({ id, root: s.root, clientCwd: s.cwd, wait: true, timeout, profile: profile === null ? null : prof && !prof.machine ? prof.id : undefined });
+        results.push({ id, ok: !!r.ready?.ok, url: r.server.url, reason: r.ready?.ok ? undefined : r.ready?.reason, ...(r.accountsNote ? { note: r.accountsNote } : {}) });
       } catch (e) {
         results.push({ id, ok: false, reason: (e as Error).message });
       }
     }
     return results;
+  }
+
+  /** One step of startSequence for a server on another machine: its /api/start, waiting until it's ready. */
+  async function startRemote(ref: string, timeout: number | undefined, prof: ProfileView | undefined): Promise<ProfileStartResult> {
+    let found: ReturnType<typeof hub.find>;
+    try {
+      found = hub.find(ref);
+    } catch (e) {
+      return { id: ref, ok: false, skipped: true, machine: splitRef(ref)!.machine, reason: (e as Error).message };
+    }
+    const { machine: m, server } = found!;
+    const id = remoteId(m.name, server.id);
+    if (!m.connected) {
+      const why = m.status.lastError ? ` (${m.status.lastError})` : "";
+      return { id, ok: false, skipped: true, machine: m.name, reason: `skipped: ${m.name} is ${m.status.state}${why}; start it again once ${m.name} is back` };
+    }
+    if (server.status === "running" || server.status === "starting") {
+      const v = hub.view(m, server);
+      return { id, ok: true, alreadyRunning: true, machine: m.name, url: v.customUrl ?? v.url ?? server.url };
+    }
+    const there = prof?.machine === m.name ? prof.id.slice(m.name.length + 1) : undefined;
+    const picks = prof && !prof.machine && Object.keys(prof.accounts).length > 0;
+    try {
+      const data = await m
+        .liveApi()
+        .call<StartResponse>("POST", "/api/start", { id: server.id, wait: true, timeout, ...(there ? { profile: there } : {}) }, ((timeout ?? 60) + 60) * 1000);
+      if (data?.server) await m.observe(data.server);
+      const r = hub.rewrite(m, data) as StartResponse & { server: RemoteServerView };
+      const note = [picks ? `uses ${m.name}'s own accounts (${prof!.name}'s account picks are for servers on this machine)` : "", data.accountsNote ?? ""].filter(Boolean).join("; ");
+      return {
+        id,
+        ok: !!r.ready?.ok,
+        machine: m.name,
+        // Its address here: the hub hostname through the proxy, else the forwarded port.
+        url: r.server?.customUrl ?? r.server?.url ?? r.server?.remoteUrl,
+        reason: r.ready?.ok ? undefined : r.ready?.reason,
+        ...(note ? { note } : {}),
+      };
+    } catch (e) {
+      return { id, ok: false, machine: m.name, reason: (e as Error).message };
+    }
+  }
+
+  /**
+   * A request about a profile shared on another machine, made there: its id and server refs in
+   * that machine's terms, and the profile in the answer in hub terms.
+   */
+  async function relayProfile(prof: ProfileView, apiPath: string, body: Record<string, any>): Promise<Record<string, any>> {
+    const m = hub.get(prof.machine!);
+    const { profile: _p, root: _r, ...rest } = body;
+    const out: Record<string, any> = { ...rest, id: prof.id.slice(m.name.length + 1) };
+    const there = (ref: string) => [...m.servers.values()].some((x) => x.id === ref || x.name === ref);
+    const here = (ref: string) => manager.servers.has(ref) || manager.list().some((x) => x.name === ref);
+    for (const key of ["servers", "add", "remove", "skip"]) if (key in body) out[key] = refsThere(m.name, body[key], { there, here });
+    const data = await m.liveApi().call<Record<string, any>>("POST", apiPath, out);
+    return data?.profile ? { ...data, profile: remoteProfileView(m.name, m.connected, data.profile) } : data;
+  }
+
+  /** A grid of a profile shared on another machine, there (tiles in hub terms). */
+  async function remoteGrid(prof: ProfileView, method: "GET" | "POST" | "RESET", items?: GridTile[]) {
+    const m = hub.get(prof.machine!);
+    const scope = `profile:${prof.id.slice(m.name.length + 1)}`;
+    const api = m.liveApi();
+    const tilesThere = items?.map((t) => ({ ...t, i: refsThere(m.name, t.i)![0] }));
+    const data =
+      method === "GET"
+        ? await api.call<{ items: GridTile[] | null }>("GET", `/api/layouts?${new URLSearchParams({ scope })}`)
+        : method === "POST"
+          ? await api.call<{ items: GridTile[] | null }>("POST", "/api/layouts", { scope, items: tilesThere })
+          : await api.call<{ items: GridTile[] | null }>("POST", "/api/layouts/reset", { scope });
+    return { ...data, scope: `profile:${prof.id}`, items: data.items?.map((t) => ({ ...t, i: remoteId(m.name, t.i) })) ?? null, grid: prof.grid, kind: prof.kind };
   }
 
   /** The server's processes, grouped by process group, each group as a tree. */
@@ -1103,13 +1257,15 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     const name = String(body.name ?? "").trim();
     assertProfileName(name);
     const layout = body.layout === undefined ? undefined : layoutItems(body.layout);
+    const active = (status: string) => status === "running" || status === "starting";
     const ids: string[] = body.running
-      ? manager.list().filter((s) => s.status === "running" || s.status === "starting").map((s) => s.id)
+      ? [...manager.list().filter((s) => active(s.status)).map((s) => s.id), ...hub.views().filter((v) => !v.stale && active(v.status)).map((v) => v.id)]
       : layout
-        ? layout.map((it) => resolveRef(undefined, it.i, false).id)
-        : serverIds(body.root, body.servers);
+        ? memberIds(undefined, layout.map((it) => it.i))
+        : memberIds(body.root, body.servers);
     const picks = accountSelections(body.accounts);
     if (body.shared) {
+      assertNoRemote(ids, "a shared profile");
       const project = String(body.project ?? resolved.servers.get(ids[0] ?? "")?.project ?? config.labelOf(path.resolve(String(body.root ?? ""))) ?? "");
       const info = resolved.projects.get(project);
       if (!info) throw new HttpError(400, "a shared profile belongs to a project; pass project (or servers from one project)");
@@ -1141,7 +1297,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
           ...(body.description ? { description: String(body.description) } : {}),
           servers: ids,
           ...(Object.keys(picks).length ? { accounts: picks } : {}),
-          ...(layout ? { grid: layout } : {}),
+          // Tiles by the same full ids as its servers ("pc/api" -> "pc/demo:api").
+          ...(layout ? { grid: layout.map((t, k) => ({ ...t, i: ids[k] })) } : {}),
         };
       }),
     );
@@ -1170,12 +1327,16 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   function updateProfile(current: ProfileView, body: Record<string, any>): ProfileView {
     const expect = typeof body.version === "string" ? body.version : undefined;
     let servers: string[] | undefined;
-    if (body.servers) servers = serverIds(body.root, body.servers);
-    if (body.add) servers = [...(servers ?? current.members), ...serverIds(body.root, body.add)];
+    const known = current.kind === "local" ? [...current.members, ...current.missing] : [];
+    if (body.servers) servers = memberIds(body.root, body.servers, known);
+    if (body.add) servers = [...(servers ?? current.members), ...memberIds(body.root, [body.add].flat(), known)];
     if (body.remove) {
       // A profile's missing entries aren't servers here, so they can't be resolved; they're dropped by name below.
-      const isMissing = (r: unknown) => current.missing.includes(String(r)) || current.missing.includes(`${current.project}:${r}`);
-      const drop = new Set(serverIds(body.root, [body.remove].flat().filter((r) => !isMissing(r))));
+      // Members are taken as written (a server on a machine that's away may not be resolvable now).
+      const refs = [body.remove].flat().map(String);
+      const isMissing = (r: string) => current.missing.includes(r) || current.missing.includes(`${current.project}:${r}`);
+      const asWritten = refs.filter((r) => current.members.includes(r));
+      const drop = new Set([...asWritten, ...memberIds(body.root, refs.filter((r) => !isMissing(r) && !asWritten.includes(r)))]);
       servers = (servers ?? current.members).filter((id) => !drop.has(id));
     }
     if (servers) servers = [...new Set(servers)];
@@ -1204,8 +1365,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
             if (servers) {
               // Refs to servers that aren't defined right now (a project on another branch) stay unless removed.
               const removed = new Set(body.remove ? [body.remove].flat().map(String) : []);
-              p.servers = [...servers, ...current.missing.filter((r) => !removed.has(r))];
-              if (p.grid) p.grid = p.grid.filter((t) => servers!.includes(t.i));
+              const kept = current.missing.filter((r) => !removed.has(r));
+              p.servers = [...new Set([...servers, ...kept])];
+              if (p.grid) p.grid = p.grid.filter((t) => servers!.includes(t.i) || kept.includes(t.i));
             }
             if (picks) {
               if (Object.keys(picks).length) p.accounts = picks;
@@ -1233,6 +1395,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     if (rename && rename !== current.name && config.repo(info.root).profiles?.[rename]) {
       throw new HttpError(409, `${info.file} already has a profile called "${rename}"`);
     }
+    if (servers) assertNoRemote(servers, `${current.name} (shared in ${current.project})`);
     const names = servers && namesIn(current.project!, servers, `${current.name} (shared in ${current.project})`);
     if (names || needs || description !== undefined || (rename && rename !== current.name)) {
       configCall(() =>
@@ -1308,7 +1471,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
    * stay yours.
    */
   function shareProfile(p: ProfileView, body: Record<string, any>): { profile: ProfileView; savedServers: string[]; notes: string[] } {
-    if (p.kind !== "local") throw new HttpError(400, `${p.name} is already shared in ${p.project}`);
+    if (p.kind !== "local") throw new HttpError(400, `${p.name} is already shared in ${p.project}${p.machine ? ` on ${p.machine}` : ""}`);
+    assertNoRemote(p.members, "a shared profile");
     const projects = [...new Set(p.servers.map((id) => resolved.servers.get(id)!.project))];
     const project = String(body.project ?? projects[0] ?? "");
     if (projects.length > 1) {
@@ -1357,7 +1521,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   }
 
   /** A copy of any profile as one of yours, to change freely. */
-  function duplicateProfile(p: ProfileView, body: Record<string, any>): ProfileView {
+  function duplicateProfile(p: ProfileView, body: Record<string, any>, remoteTiles?: GridTile[] | null): ProfileView {
     let name = String(body.name ?? "").trim();
     if (!name) {
       name = p.kind === "shared" ? `${p.name} (mine)` : `${p.name} copy`;
@@ -1365,14 +1529,15 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     assertProfileName(name);
     if (config.local.profiles?.[name]) throw new HttpError(409, `you already have a profile called "${name}"`);
-    const grid = resolved.grids.get(`profile:${p.id}`);
+    const grid = p.machine ? (remoteTiles ?? undefined) : resolved.grids.get(`profile:${p.id}`);
     configCall(() =>
       config.editLocal((c) => {
         c.profiles ??= {};
         c.profiles[name] = {
           ...(p.description ? { description: p.description } : {}),
           servers: [...p.servers],
-          ...(Object.keys(p.accounts).length ? { accounts: p.accounts } : {}),
+          // Another machine's picks name accounts there; your profiles' picks are for this machine.
+          ...(Object.keys(p.accounts).length && !p.machine ? { accounts: p.accounts } : {}),
           ...(grid?.length ? { grid } : {}),
         };
       }),
@@ -1496,7 +1661,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     // Accounts each profile's servers would need here.
     const accountChecks: { profile: string; error: string }[] = [];
     for (const p of profiles()) {
-      if (!Object.keys(p.accounts).length) continue;
+      if (!Object.keys(p.accounts).length || p.machine) continue;
       try {
         await accounts.env(accounts.normalize(p.accounts));
       } catch (e) {
@@ -1547,6 +1712,11 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
    * and bring the answer back in hub terms. Undefined: not a remote server, handle it here.
    */
   async function relay(req: Request, p: string, q: URLSearchParams, body: Record<string, any>): Promise<object | Response | undefined> {
+    if (req.method === "POST" && (p === "/api/start" || p === "/api/restart") && typeof body.profile === "string") {
+      const ref = body.id ?? body.name;
+      const machine = (typeof ref === "string" ? splitRef(ref)?.machine : undefined) ?? (typeof body.machine === "string" ? body.machine : undefined);
+      if (machine) body = { ...body, profile: profileThere(machine, body.profile) };
+    }
     if (req.method === "POST" && p === "/api/start") {
       const started = await hub.start(body);
       if (started) return started;
@@ -1559,6 +1729,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       // root and the client's folder are this machine's paths; the remote knows the server by id.
       const { root: _root, name: _name, clientCwd: _cwd, id: _id, ...rest } = body;
       const data = await t.api.call("POST", p, { ...rest, id: t.server.id });
+      // Removed there: like a server removed here, it leaves your profiles and grids.
+      if (p === "/api/remove") forgetRemote(t.machine.name, t.server);
       // Started or restarted: answer with its local URL, once the port is forwarded.
       if (["/api/start", "/api/restart", "/api/wait"].includes(p)) await t.machine.observe(data?.server);
       return hub.rewrite(t.machine, data);
@@ -1577,6 +1749,36 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       return hub.rewrite(t.machine, await t.api.call("GET", `${p}?${params}`));
     }
     return undefined;
+  }
+
+  /**
+   * `profile` for a start relayed to `machine`: a profile shared there goes by its id there; one of
+   * yours (or another machine's) is dropped, so the server gets the accounts its machine resolves
+   * (your picks name accounts signed in here). A name the hub doesn't know is passed on as is.
+   */
+  function profileThere(machine: string, ref: string): string | undefined {
+    let prof: ProfileView | undefined;
+    try {
+      prof = profileRef(ref);
+    } catch {
+      return ref;
+    }
+    return prof.machine === machine ? prof.id.slice(machine.length + 1) : undefined;
+  }
+
+  /** A server removed on its machine leaves your profiles and grids (by its id, or a name you wrote). */
+  function forgetRemote(machine: string, server: { id: string; name: string }) {
+    const drop = new Set([remoteId(machine, server.id), remoteId(machine, server.name)]);
+    configCall(() =>
+      config.editLocal((c) => {
+        for (const p of Object.values(c.profiles ?? {})) {
+          if (Array.isArray(p.servers)) p.servers = p.servers.filter((id) => !drop.has(id));
+          if (Array.isArray(p.grid)) p.grid = p.grid.filter((t) => !drop.has(t.i));
+        }
+        if (Array.isArray(c.grid)) c.grid = c.grid.filter((t) => !drop.has(t.i));
+      }),
+    );
+    reconcile();
   }
 
   /** The "Add machine" checklist; on success the machine is saved in config.json and stays connected. */
@@ -1728,7 +1930,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         project,
         root,
         servers: [...resolved.servers.values()].filter((d) => d.project === project).map((d) => d.id),
-        profiles: profiles().filter((x) => x.project === project).map((x) => x.id),
+        profiles: profiles().filter((x) => x.project === project && !x.machine).map((x) => x.id),
       };
     }
     if (p === "/api/setup" && req.method === "POST") return setup(body);
@@ -1772,7 +1974,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       accountsChanged();
       // Profiles that picked accounts for it would fail to start (and to save), so their picks go too.
       // A built-in with the same id comes back, and keeps them.
-      const usedBy = r.restoredBuiltIn ? [] : profiles().filter((x) => (x.kind === "local" ? x.accounts : (x.mine ?? {}))[id]);
+      const usedBy = r.restoredBuiltIn ? [] : profiles().filter((x) => !x.machine && (x.kind === "local" ? x.accounts : (x.mine ?? {}))[id]);
       for (const x of usedBy) updateProfile(x, { mergeAccounts: { [id]: null } });
       return { removed: id, ...r, clearedFrom: usedBy.map((x) => x.name) };
     }
@@ -1794,13 +1996,35 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       return { profile };
     }
     if (p === "/api/profiles/update" && req.method === "POST") {
-      return { profile: updateProfile(profileRef(body.id ?? body.profile), body) };
+      const current = profileRef(body.id ?? body.profile);
+      // Shared on another machine: its servedev.json (and your changes to it) are there.
+      if (current.machine) return relayProfile(current, p, body);
+      return { profile: updateProfile(current, body) };
     }
     if (p === "/api/profiles/resolve") return { id: profileRef(q.get("ref") ?? "").id };
-    if (p === "/api/profiles/delete" && req.method === "POST") return deleteProfile(profileRef(body.id ?? body.profile));
+    if (p === "/api/profiles/delete" && req.method === "POST") {
+      const current = profileRef(body.id ?? body.profile);
+      if (current.machine) return relayProfile(current, p, body);
+      return deleteProfile(current);
+    }
     if (p === "/api/profiles/share" && req.method === "POST") return shareProfile(profileRef(body.id ?? body.profile), body);
-    if (p === "/api/profiles/duplicate" && req.method === "POST") return { profile: duplicateProfile(profileRef(body.id ?? body.profile), body) };
+    if (p === "/api/profiles/duplicate" && req.method === "POST") {
+      const current = profileRef(body.id ?? body.profile);
+      // A copy of another machine's shared profile keeps its layout (fetched from there when it's connected).
+      const tiles = current.machine ? await remoteGrid(current, "GET").then((g) => g.items).catch(() => null) : undefined;
+      return { profile: duplicateProfile(current, body, tiles) };
+    }
     // Bulk actions for the dashboard: the servers of whatever it's showing (all, a profile, a grid).
+    if (p === "/api/servers/start" && req.method === "POST" && body.profile) {
+      // A profile's servers: one after another in its order, across machines.
+      const prof = profileRef(body.profile);
+      const ids = (Array.isArray(body.ids) ? body.ids : []).map(String);
+      if (body.wait === false) {
+        void startSequence(ids, body.timeout, prof);
+        return { starting: ids };
+      }
+      return { results: await startSequence(ids, body.timeout, prof) };
+    }
     if (p === "/api/servers/start" && req.method === "POST") {
       const { local, remote } = hub.partition(Array.isArray(body.ids) ? body.ids : []);
       const ids = serverIds(undefined, local);
@@ -2112,6 +2336,20 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
           abort.abort();
         };
       });
+    }
+    // A grid of a profile shared on another machine lives there.
+    const remoteGridOf = (scope: string) => {
+      const g = gridScope(scope);
+      return g.kind === "profile" && g.profile.machine ? g.profile : undefined;
+    };
+    if (p.startsWith("/api/layouts")) {
+      const scope = String((req.method === "GET" ? q.get("scope") : body.scope) ?? "draft");
+      const there = remoteGridOf(scope);
+      if (there) {
+        const info = await remoteGrid(there, req.method === "GET" ? "GET" : p === "/api/layouts/reset" ? "RESET" : "POST", req.method === "GET" ? undefined : layoutItems(body.items ?? []));
+        if (req.method === "POST") manager.emit("layout", { scope: info.scope, source: p === "/api/layouts/reset" ? null : (body.source ?? null) });
+        return info;
+      }
     }
     if (p === "/api/layouts" && req.method === "GET") return gridInfo(q.get("scope") ?? "draft");
     if (p === "/api/layouts" && req.method === "POST") {

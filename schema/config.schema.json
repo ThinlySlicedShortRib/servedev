@@ -226,11 +226,11 @@
             "items": {
               "type": "string"
             },
-            "description": "Server ids (\"project:name\") in start order."
+            "description": "Server ids in start order: \"project:name\" here, \"<machine>/project:name\" on another machine (see machines). Each starts on its own machine, after the previous one is ready."
           },
           "accounts": {
             "type": "object",
-            "description": "Accounts its servers use instead of this machine's, e.g. {\"gcloud\": {\"account\": \"me@x.com\"}}.",
+            "description": "Accounts its servers on this machine use instead of this machine's, e.g. {\"gcloud\": {\"account\": \"me@x.com\"}}. Servers on other machines use the accounts their machine resolves.",
             "additionalProperties": {
               "type": "object",
               "additionalProperties": {
@@ -253,7 +253,7 @@
               "properties": {
                 "i": {
                   "type": "string",
-                  "description": "The server (a name in servedev.json; an id like \"project:name\" in config.json)."
+                  "description": "The server (a name in servedev.json; an id like \"project:name\", or \"<machine>/project:name\" on another machine, in config.json)."
                 },
                 "x": {
                   "type": "integer",
@@ -373,7 +373,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Server ids that stay on top and start at login."
+      "description": "Server ids that stay on top and start at login. Another machine's servers are pinned there (in its own config), not here."
     },
     "grid": {
       "type": "array",
@@ -390,7 +390,7 @@
         "properties": {
           "i": {
             "type": "string",
-            "description": "The server (a name in servedev.json; an id like \"project:name\" in config.json)."
+            "description": "The server (a name in servedev.json; an id like \"project:name\", or \"<machine>/project:name\" on another machine, in config.json)."
           },
           "x": {
             "type": "integer",

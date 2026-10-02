@@ -547,7 +547,16 @@ interface AutostartInfo {
 }
 
 export async function opPin(a: { cwd: string; name?: string; pinned: boolean }): Promise<OpResult> {
-  const r = await api<{ server: PublicServer; autostart: AutostartInfo }>("/api/pin", { root: findRoot(a.cwd), name: a.name, pinned: a.pinned });
+  const r = await api<{ server: AnyServer; autostart: AutostartInfo }>("/api/pin", { root: findRoot(a.cwd), name: a.name, pinned: a.pinned });
+  const m = r.server.machine;
+  if (m) {
+    // Pinned in that machine's own config: it starts when servedev starts there, hub or no hub.
+    const text = a.pinned
+      ? `pinned ${r.server.id} on ${m} (in ${m}'s own config); it starts whenever servedev starts on ${m}` +
+        (r.autostart?.installed ? ", which it does at login there." : `. servedev doesn't start at login there by itself: on a Windows PC, servedev remote boot ${m} sets that up.`)
+      : `unpinned ${r.server.id} on ${m}; it no longer starts when servedev starts there.`;
+    return { ok: true, text, data: r };
+  }
   let text = a.pinned
     ? `pinned ${r.server.id}; it starts automatically when you log in.`
     : `unpinned ${r.server.id}; it no longer starts at login.`;
@@ -566,7 +575,7 @@ export async function opAutostart(enable?: boolean): Promise<OpResult> {
 }
 
 interface ProfileInfo {
-  /** "local:<name>" for yours; "<project>:<name>" for one shared in a repo's servedev.json. */
+  /** "local:<name>" for yours; "<project>:<name>" for one shared in a repo's servedev.json; "pc/<project>:<name>" for one shared on another machine. */
   id: string;
   name: string;
   kind: "local" | "shared";
@@ -582,11 +591,46 @@ interface ProfileInfo {
   file: string;
   uncommitted?: boolean;
   grid: { source: "repo" | "override" | "local" | null; hasRepoDefault: boolean; hasOverride: boolean };
+  /** Members on a machine that isn't connected now. */
+  unavailable?: string[];
+  /** Shared in a repo on this other machine. */
+  machine?: string;
 }
 
-/** "Full stack (shared in capcon-apps, main)" / "Mine (yours)" */
+/** "Full stack (shared in capcon-apps, main)" / "Demo (shared in demo on pc)" / "Mine (yours)" */
 function profileLabel(p: ProfileInfo): string {
-  return p.kind === "shared" ? `${p.name} (shared in ${p.project}${p.branch ? `, ${p.branch}` : ""}${p.uncommitted ? ", uncommitted changes" : ""})` : `${p.name} (yours)`;
+  return p.kind === "shared"
+    ? `${p.name} (shared in ${p.project}${p.machine ? ` on ${p.machine}` : ""}${p.branch ? `, ${p.branch}` : ""}${p.uncommitted ? ", uncommitted changes" : ""})`
+    : `${p.name} (yours)`;
+}
+
+/** "pc/demo:api" -> "pc"; undefined for this machine's. */
+const machineOfId = (id: string) => (id.indexOf("/") > 0 ? id.slice(0, id.indexOf("/")) : undefined);
+
+/** One line per result of starting servers in order (a profile, or bulk). */
+function startLines(results: ProfileStartResult[]): string[] {
+  return results.map((x) => {
+    const line = x.alreadyRunning
+      ? `✓ ${x.id} already running${x.url ? ` at ${x.url}` : ""}`
+      : x.ok
+        ? `✓ ${x.id} ready${x.url ? ` at ${x.url}` : ""}`
+        : x.skipped
+          ? `– ${x.id} ${x.reason?.startsWith("skipped") ? x.reason : `skipped: ${x.reason}`}`
+          : `✗ ${x.id}: ${x.reason}`;
+    return x.note ? `${line}
+    note: ${x.note}` : line;
+  });
+}
+
+interface ProfileStartResult {
+  id: string;
+  ok: boolean;
+  alreadyRunning?: boolean;
+  skipped?: boolean;
+  machine?: string;
+  url?: string;
+  reason?: string;
+  note?: string;
 }
 
 /** "gcloud account=me@x.com project=p; github user=me" */
@@ -599,9 +643,9 @@ export function describeSelections(selections: Record<string, Record<string, str
 }
 
 export async function opProfiles(): Promise<OpResult> {
-  const [{ profiles }, { servers }] = await Promise.all([
+  const [{ profiles }, { servers, machines = [] }] = await Promise.all([
     api<{ profiles: ProfileInfo[] }>("/api/profiles"),
-    api<{ servers: PublicServer[] }>("/api/servers"),
+    api<{ servers: AnyServer[]; machines?: MachineSummary[] }>("/api/servers"),
   ]);
   if (!profiles.length) {
     return {
@@ -611,20 +655,36 @@ export async function opProfiles(): Promise<OpResult> {
     };
   }
   const byId = new Map(servers.map((s) => [s.id, s]));
+  const stateOf = new Map(machines.map((m) => [m.name, m.state]));
   const lines = profiles.map((p) => {
     const running = p.servers.filter((id) => ["running", "starting"].includes(byId.get(id)?.status ?? "")).length;
-    const members = p.servers.map((id) => `${SYMBOL[byId.get(id)?.status ?? "stopped"] ?? " "} ${id}`).join("\n    ");
+    // Another machine's servers say where they are, and when that machine is away.
+    const where = (id: string) => {
+      const m = machineOfId(id);
+      if (!m || p.machine) return "";
+      const state = stateOf.get(m);
+      return state && state !== "connected" ? `  (on ${m}, ${state}: last known)` : `  (on ${m})`;
+    };
+    const members = p.servers.map((id) => `${SYMBOL[byId.get(id)?.status ?? "stopped"] ?? " "} ${id}${where(id)}`).join("\n    ");
+    const away = p.machine && stateOf.get(p.machine) !== "connected" ? `    ${p.machine} is ${stateOf.get(p.machine) ?? "not connected"}: its last known state; starting it waits until it's back` : "";
+    const elsewhere = [...new Set(p.servers.map(machineOfId).filter(Boolean))];
     const extra = [
       p.description ? `    ${p.description}` : "",
-      Object.keys(p.accounts ?? {}).length ? `    accounts: ${describeSelections(p.accounts)}` : "",
+      away,
+      Object.keys(p.accounts ?? {}).length
+        ? `    accounts: ${describeSelections(p.accounts)}${p.machine ? ` (on ${p.machine})` : elsewhere.length ? ` (servers here; ones on ${elsewhere.join(", ")} use that machine's)` : ""}`
+        : "",
       p.skipped.length ? `    skipped by you: ${p.skipped.join(", ")}` : "",
-      p.missing.length ? `    not defined: ${p.missing.join(", ")}` : "",
+      p.missing.length
+        ? `    not defined: ${p.missing.map((id) => (machineOfId(id) && !stateOf.has(machineOfId(id)!) ? `${id} (no machine "${machineOfId(id)}" here)` : machineOfId(id) ? `${id} (not on ${machineOfId(id)})` : id)).join(", ")}`
+        : "",
     ].filter(Boolean);
     return `${p.id}  ${profileLabel(p)} (${running}/${p.servers.length} running)\n${extra.map((l) => l + "\n").join("")}    ${members || "(no servers)"}`;
   });
   const text =
     lines.join("\n") +
-    "\n\nShared profiles live in the repo's servedev.json (commit to share changes); yours live in ~/.servedev/config.json. Refer to a profile by name, or by id when a shared one exists in several worktrees.";
+    "\n\nShared profiles live in the repo's servedev.json (commit to share changes); yours live in ~/.servedev/config.json. Refer to a profile by name, or by id when a shared one exists in several worktrees." +
+    (machines.length ? " Yours can mix machines (pc/<server>); ones shared on another machine are that machine's (ids pc/<project>:<name>)." : "");
   return { ok: true, text, data: profiles };
 }
 
@@ -717,18 +777,14 @@ export async function opProfile(a: {
       return { ok: true, text: `deleted profile ${r.deleted} from ${r.file} (its servers are untouched)`, data: r };
     }
     case "start": {
-      const r = await api<{ profile: ProfileInfo; results: { id: string; ok: boolean; alreadyRunning?: boolean; url?: string; reason?: string }[] }>(
-        "/api/profiles/start",
-        { profile: a.name },
-      );
-      const lines = r.results.map((x) =>
-        x.alreadyRunning ? `✓ ${x.id} already running${x.url ? ` at ${x.url}` : ""}` : x.ok ? `✓ ${x.id} ready${x.url ? ` at ${x.url}` : ""}` : `✗ ${x.id}: ${x.reason}`,
-      );
-      const failed = r.results.filter((x) => !x.ok).length;
+      const r = await api<{ profile: ProfileInfo; results: ProfileStartResult[] }>("/api/profiles/start", { profile: a.name });
+      const lines = startLines(r.results);
+      const failed = r.results.filter((x) => !x.ok && !x.skipped).length;
+      const skipped = r.results.filter((x) => x.skipped).length;
       return {
         ok: failed === 0,
         text: lines.length
-          ? `${r.profile.name}:\n${lines.join("\n")}${failed ? `\n${failed} failed; see servedev logs <name>.` : ""}`
+          ? `${r.profile.name}:\n${lines.join("\n")}${failed ? `\n${failed} failed; see servedev logs <name>.` : ""}${skipped ? `\n${skipped} skipped: ${skipped === 1 ? "its machine isn't" : "their machines aren't"} connected (servedev remote ls).` : ""}`
           : `${r.profile.name} has no servers yet. Add some with: servedev profile add "${r.profile.name}" <servers...>`,
         data: r,
       };
@@ -773,6 +829,18 @@ async function resolveServerIds(cwd: string, refs: string[]): Promise<string[]> 
   const root = findRoot(cwd);
   return refs.map((ref) => {
     if (servers.some((s) => s.id === ref)) return ref;
+    const m = machineOfId(ref);
+    if (m) {
+      // "pc/api": a name (or id) among that machine's servers.
+      const name = ref.slice(m.length + 1);
+      const there = servers.filter((s) => (s as AnyServer).machine === m && (s.name === name || (s as AnyServer).remoteId === name));
+      if (there.length === 1) return there[0].id;
+      throw new Error(
+        there.length
+          ? `"${ref}" matches several servers on ${m} (${there.map((s) => s.id).join(", ")}); use the full id`
+          : `no server "${name}" on ${m}. Known there: ${servers.filter((s) => (s as AnyServer).machine === m).map((s) => s.id).join(", ") || "none"}`,
+      );
+    }
     const local = servers.find((s) => s.root === root && s.name === ref);
     if (local) return local.id;
     const global = servers.filter((s) => s.name === ref);
@@ -807,10 +875,12 @@ async function findProfile(name: string): Promise<ProfileInfo> {
 export async function opBulk(a: { cwd: string; action: "start" | "stop"; profile?: string; servers?: string[]; all?: boolean }): Promise<OpResult> {
   let ids: string[];
   let scope: string;
+  let profileId: string | undefined;
   if (a.profile) {
     const p = await findProfile(a.profile);
     ids = p.servers;
     scope = `profile ${p.name}`;
+    profileId = p.id;
   } else if (a.servers?.length) {
     ids = await resolveServerIds(a.cwd, a.servers);
     scope = `${ids.length} named server${ids.length === 1 ? "" : "s"}`;
@@ -829,9 +899,9 @@ export async function opBulk(a: { cwd: string; action: "start" | "stop"; profile
     await api("/api/servers/stop", { ids: targets });
     return { ok: true, text: `Stopped ${targets.length} (${scope}): ${targets.join(", ")}`, data: { ids: targets } };
   }
-  const r = await api<{ results: { id: string; ok: boolean; url?: string; reason?: string }[] }>("/api/servers/start", { ids: targets });
-  const lines = r.results.map((x) => (x.ok ? `✓ ${x.id}${x.url ? ` at ${x.url}` : ""}` : `✗ ${x.id}: ${x.reason}`));
-  return { ok: r.results.every((x) => x.ok), text: `Started ${scope}, in order:\n${lines.join("\n")}`, data: r };
+  // A profile's servers start in its order across machines (with its accounts); others, each machine in order.
+  const r = await api<{ results: ProfileStartResult[] }>("/api/servers/start", { ids: targets, ...(profileId ? { profile: profileId } : {}) });
+  return { ok: r.results.every((x) => x.ok || x.skipped), text: `Started ${scope}, in order:\n${startLines(r.results).join("\n")}`, data: r };
 }
 
 // ---------- folders ----------

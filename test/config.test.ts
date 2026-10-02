@@ -299,3 +299,27 @@ test("resolve: the unsaved grid keeps tiles of a configured machine's servers, a
   });
   expect(resolveConfig(s).grids.get("draft")?.map((t) => t.i)).toEqual(["app:api", "pc/demo:api"]);
 });
+
+test("resolve: your profiles keep other machines' servers in order; an unknown machine's are missing, never dropped", () => {
+  const root = repo({ servers: { api: { command: "a" }, web: { command: "w" } } });
+  const s = store({
+    projects: { app: { path: root } },
+    machines: { pc: { ssh: "me@100.64.0.2" } },
+    profiles: {
+      "Full stack": {
+        servers: ["pc/demo:api", "app:web", "nas/photos:web", "pc/demo:api"],
+        grid: [
+          { i: "pc/demo:api", x: 0, y: 0, w: 6, h: 9 },
+          { i: "app:web", x: 6, y: 0, w: 6, h: 9 },
+          { i: "nas/photos:web", x: 0, y: 9, w: 6, h: 9 },
+        ],
+      },
+    },
+  });
+  const r = resolveConfig(s);
+  const p = r.profiles.find((x) => x.id === "local:Full stack")!;
+  expect(p.servers).toEqual(["pc/demo:api", "app:web"]);
+  expect(p.members).toEqual(["pc/demo:api", "app:web"]);
+  expect(p.missing).toEqual(["nas/photos:web"]);
+  expect(r.grids.get("profile:local:Full stack")?.map((t) => t.i)).toEqual(["pc/demo:api", "app:web"]);
+});

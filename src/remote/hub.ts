@@ -12,6 +12,8 @@ import { RefError, assertMachineName, remoteId, resolveRemoteRef, splitRef } fro
 import { Machine, type MachineDeps } from "./machine";
 import { assertRemotePath, isMissingEndpoint, remoteStartBody, tooOld } from "./create";
 import type { MachineConfig, MachineSummary, RemoteServerView, SetupStep } from "./types";
+import type { ProfileView } from "../config";
+import { remoteProfileView, sharedOn, type MachineLookup } from "./profiles";
 
 export interface HubDeps extends Omit<MachineDeps, "reserved"> {
   /** URL of a hostname through the hub's proxy (undefined while the proxy isn't running). */
@@ -65,6 +67,9 @@ export class RemoteHub extends EventEmitter {
     };
     m.on("status", all);
     m.on("forwards", all);
+    // Its shared profiles, and whether profiles' members there can be reached, follow its state.
+    m.on("status", () => this.emit("profiles"));
+    m.on("profiles", () => this.emit("profiles"));
     m.on("detected", (facts) => this.emit("detected", name, facts));
     m.on("warning", (msg: string) => console.log(`remote ${name}: ${msg}`));
     return m;
@@ -79,6 +84,7 @@ export class RemoteHub extends EventEmitter {
     this.machines.delete(name);
     for (const id of ids) this.emit("remove", { id: remoteId(name, id) });
     this.emit("machine-removed", { name });
+    this.emit("profiles");
   }
 
   /**
@@ -187,6 +193,17 @@ export class RemoteHub extends EventEmitter {
       forwards,
       steps: m.steps,
     };
+  }
+
+  /** Profiles shared in repos on other machines, in hub terms ("pc/<project>:<name>"). */
+  profiles(): ProfileView[] {
+    return [...this.machines.values()].flatMap((m) => sharedOn(m.profiles).map((p) => remoteProfileView(m.name, m.connected, p)));
+  }
+
+  /** What's known about a machine's servers, for checking your profiles' refs to them. */
+  lookup(name: string): MachineLookup | undefined {
+    const m = this.machines.get(name);
+    return m && { name: m.name, connected: m.connected, servers: [...m.servers.values()] };
   }
 
   summaries(): MachineSummary[] {

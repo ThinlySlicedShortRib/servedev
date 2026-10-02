@@ -37,10 +37,10 @@ export const SETTINGS = {
 } as const;
 export type SettingKey = keyof typeof SETTINGS;
 
-/** A local profile: any servers, from any project or worktree. */
+/** A local profile: any servers, from any project or worktree, on this machine or another one. */
 export interface LocalProfileConfig {
   description?: string;
-  /** Server ids ("project:name") in start order. */
+  /** Server ids ("project:name", or "pc/project:name" on another machine) in start order. */
   servers: string[];
   /** Your account picks for its servers, e.g. { gcloud: { account: "me@x.com" } }. */
   accounts?: Selections;
@@ -483,6 +483,14 @@ export interface ProfileView {
   /** Version of the file it lives in, for conflict-safe edits. */
   version: string;
   grid: { source: "repo" | "override" | "local" | null; hasRepoDefault: boolean; hasOverride: boolean };
+  /**
+   * Members on another machine that isn't connected right now (yours): kept, shown as their last
+   * known state, and skipped when the profile starts. A machine's own shared profile: all of them
+   * while it's away.
+   */
+  unavailable?: string[];
+  /** A profile shared in a repo on another machine (relayed from it): that machine's name. */
+  machine?: string;
 }
 
 export interface Resolved {
@@ -618,9 +626,16 @@ export function resolveConfig(store: ConfigStore): Resolved {
   // Profiles.
   const profiles: ProfileView[] = [];
   const grids = new Map<string, GridTile[]>();
-  // The unsaved grid can also show another machine's servers ("pc/<id>"); profiles can't yet.
-  const machineNames = new Set(Object.keys(isObject(local.machines) ? local.machines : {}));
-  const draft = validTiles(local.grid).filter((t) => servers.has(t.i) || machineNames.has(t.i.slice(0, Math.max(0, t.i.indexOf("/")))));
+  const machines = resolveMachines(local.machines, (m) => warn(store.localFile, m));
+  // Your profiles and grids can hold another machine's servers ("pc/<id>"). Whether that server
+  // still exists there is the machine's to say; the daemon checks it against what the machine
+  // reports. Here a ref only needs a machine you have.
+  const machineOf = (ref: string) => (ref.indexOf("/") > 0 ? ref.slice(0, ref.indexOf("/")) : undefined);
+  const onMachine = (ref: string) => {
+    const m = machineOf(ref);
+    return !!m && m in machines;
+  };
+  const draft = validTiles(local.grid).filter((t) => servers.has(t.i) || onMachine(t.i));
   if (draft.length) grids.set("draft", draft);
 
   for (const info of projects.values()) {
@@ -689,6 +704,12 @@ export function resolveConfig(store: ConfigStore): Resolved {
     const ids: string[] = [];
     const missing: string[] = [];
     for (const ref of refs) {
+      if (machineOf(ref)) {
+        // Another machine's server: kept as written; an unknown machine makes it missing (never dropped).
+        if (!onMachine(ref)) missing.push(ref);
+        else if (!ids.includes(ref)) ids.push(ref);
+        continue;
+      }
       const id = servers.has(ref) ? ref : byName.get(ref)?.length === 1 ? byName.get(ref)![0] : undefined;
       if (id) {
         if (!ids.includes(id)) ids.push(id);
@@ -696,7 +717,7 @@ export function resolveConfig(store: ConfigStore): Resolved {
     }
     const lp = raw as LocalProfileConfig;
     const id = `local:${name}`;
-    const tiles = validTiles(lp.grid).filter((t) => servers.has(t.i));
+    const tiles = validTiles(lp.grid).filter((t) => servers.has(t.i) || onMachine(t.i));
     if (lp.grid) grids.set(`profile:${id}`, tiles);
     profiles.push({
       id,
@@ -715,7 +736,7 @@ export function resolveConfig(store: ConfigStore): Resolved {
   }
   profiles.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "local" ? -1 : 1) || a.name.localeCompare(b.name) || (a.project ?? "").localeCompare(b.project ?? ""));
 
-  return { projects, servers, profiles, grids, machines: resolveMachines(local.machines, (m) => warn(store.localFile, m)), issues };
+  return { projects, servers, profiles, grids, machines, issues };
 }
 
 /** config.json's machines, skipping (and reporting) entries that can't be used. */
