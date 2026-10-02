@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { CLIENT_ID, streamUrl, type ConfigSummary, type Configured, type Profile, type Server } from "@/lib/api"
+import { CLIENT_ID, streamUrl, type ConfigSummary, type Configured, type Machine, type Profile, type Server } from "@/lib/api"
 
 /** Live server state from the daemon's event stream. */
 export function useServedev() {
@@ -14,11 +14,13 @@ export function useServedev() {
   const [layoutChange, setLayoutChange] = React.useState<{ scope: string; at: number } | null>(null)
   /** Bumped when platform accounts change (switched here, by an agent, or the CLI). */
   const [accountsVersion, setAccountsVersion] = React.useState(0)
+  /** Other machines this servedev relays (a hub's); empty on a machine without any. */
+  const [machines, setMachines] = React.useState<Map<string, Machine>>(new Map())
 
   React.useEffect(() => {
     const es = new EventSource(streamUrl("/api/stream/events"))
     es.addEventListener("snapshot", (e) => {
-      const d = JSON.parse(e.data) as { build?: string; servers: Server[]; configured: Configured[]; profiles: Profile[]; config?: ConfigSummary }
+      const d = JSON.parse(e.data) as { build?: string; servers: Server[]; configured: Configured[]; profiles: Profile[]; config?: ConfigSummary; machines?: Machine[] }
       // The daemon was updated while this tab stayed open: load the new dashboard.
       const mine = document.querySelector<HTMLMetaElement>('meta[name="servedev-build"]')?.content
       if (d.build && mine && !mine.startsWith("{{") && d.build !== mine) {
@@ -29,6 +31,7 @@ export function useServedev() {
       setConfigured(d.configured)
       setProfiles(d.profiles ?? [])
       setConfig(d.config ?? null)
+      setMachines(new Map((d.machines ?? []).map((m) => [m.name, m])))
       setConnected(true)
     })
     es.addEventListener("server", (e) => {
@@ -44,6 +47,18 @@ export function useServedev() {
         return next
       })
     })
+    es.addEventListener("machine", (e) => {
+      const m = JSON.parse(e.data) as Machine
+      setMachines((all) => new Map(all).set(m.name, m))
+    })
+    es.addEventListener("machine-removed", (e) => {
+      const { name } = JSON.parse(e.data) as { name: string }
+      setMachines((all) => {
+        const next = new Map(all)
+        next.delete(name)
+        return next
+      })
+    })
     es.addEventListener("profiles", (e) => setProfiles(JSON.parse(e.data) as Profile[]))
     es.addEventListener("config", (e) => setConfig(JSON.parse(e.data) as ConfigSummary))
     es.addEventListener("layout", (e) => {
@@ -55,7 +70,7 @@ export function useServedev() {
     return () => es.close()
   }, [])
 
-  return { servers, configured, profiles, config, connected, layoutChange, accountsVersion }
+  return { servers, configured, profiles, config, connected, layoutChange, accountsVersion, machines }
 }
 
 /** Current time, refreshed on an interval, for uptime labels. */

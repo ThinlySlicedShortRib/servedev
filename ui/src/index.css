@@ -192,3 +192,25 @@
 .react-grid-item > .react-resizable-handle::after {
   border-color: var(--muted-foreground);
 }
+
+/* Another machine reconnecting: a short bar sweeping along a hairline (currentColor). */
+@keyframes machine-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.machine-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.machine-sweep::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 25%;
+  background: currentColor;
+  border-radius: inherit;
+  animation: machine-sweep 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .machine-sweep::after { animation: none; width: 100%; opacity: 0.4; }
+}

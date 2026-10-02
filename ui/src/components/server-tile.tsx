@@ -16,6 +16,9 @@ import { cn } from "@/lib/utils"
 import { useStyleId } from "@/components/style-provider"
 import { useStatusFx } from "@/hooks/use-status-fx"
 import { ACTIVE, api, openUrl, portOf, statusLabel, type Server } from "@/lib/api"
+import { MachineTag } from "@/components/machine-ui"
+import { useMachines } from "@/hooks/use-machines"
+import { remotePortOf } from "@/lib/machines"
 
 /** Class names react-grid-layout uses to decide what drags a tile and what doesn't. */
 export const DRAG_HANDLE = "tile-drag-handle"
@@ -45,9 +48,11 @@ function IconAction({
   href,
   children,
   className,
+  disabled,
 }: {
   label: string
   onClick?: () => void
+  disabled?: boolean
   /** Renders as a link (opens in a new tab) instead of a button. */
   href?: string
   children: React.ReactNode
@@ -58,7 +63,12 @@ function IconAction({
     <Tooltip>
       <TooltipTrigger
         render={
-          href ? <Button {...props} nativeButton={false} render={<a href={href} target="_blank" rel="noopener" />} /> : <Button {...props} onClick={onClick} />
+          href ? (
+            <Button {...props} nativeButton={false} render={<a href={href} target="_blank" rel="noopener" />} />
+          ) : (
+            // aria-disabled, not disabled: the tooltip still says why.
+            <Button {...props} aria-disabled={disabled || undefined} className={cn(props.className, disabled && "opacity-40 hover:bg-transparent")} onClick={disabled ? undefined : onClick} />
+          )
         }
       >
         {children}
@@ -84,8 +94,12 @@ export function ServerTile({
 }) {
   const active = ACTIVE.includes(s.status)
   const startProfile = useStartProfile(s.id)
-  const href = openUrl(s)
-  const port = portOf(s)
+  // On another machine: its own port, and while that machine isn't connected, no actions.
+  const machine = useMachines().get(s.machine)
+  const down = !!s.machine && (!!s.stale || (!!machine && machine.state !== "connected"))
+  const href = down ? undefined : openUrl(s)
+  const port = s.machine ? remotePortOf(s) : portOf(s)
+  const paused = down ? ` (paused: ${s.machine} isn't connected)` : ""
   const logRef = React.useRef<HTMLPreElement>(null)
   const stick = React.useRef(true)
   const [searching, setSearching] = React.useState(false)
@@ -132,6 +146,7 @@ export function ServerTile({
       <div className={cn(DRAG_HANDLE, "flex cursor-grab items-center gap-2 border-b px-2 py-1.5 active:cursor-grabbing terminal:bg-muted/60 terminal:py-1 studio:h-9 studio:py-0 friendly:flex-wrap friendly:gap-x-2 friendly:gap-y-1 friendly:bg-card friendly:px-3 friendly:py-2", s.status === "crashed" && "studio:bg-destructive/[0.06] friendly:bg-status-crashed-soft/60")}>
         <GripVerticalIcon className="size-3.5 shrink-0 text-muted-foreground studio:text-muted-foreground/60" aria-hidden />
         <StatusDot status={s.status} />
+        {machine && <MachineTag machine={machine} className={cn(NO_DRAG, "cursor-default")} />}
         <Hint label={`Show ${s.project} / ${s.name} in Single view, with details, processes and preview`}>
           <button type="button" className={cn(NO_DRAG, "flex min-w-0 items-baseline gap-1.5 text-left friendly:min-w-[6.5rem] friendly:flex-1 friendly:basis-0 friendly:rounded-md friendly:outline-none friendly:focus-visible:ring-4 friendly:focus-visible:ring-ring/35")} onClick={onOpenDetails}>
             <TruncatedText text={s.name} className={cn("text-sm font-medium friendly:font-bold", s.status === "crashed" && "studio:text-destructive")} />
@@ -142,10 +157,10 @@ export function ServerTile({
         </Hint>
         {href ? (
           <TruncatedText text={href} className="min-w-12 shrink font-mono text-xs text-muted-foreground studio:text-[11px] studio:tabular-nums">
-            {s.customUrl ? s.hostname : `:${port}`}
+            {s.machine ? `${s.machine}:${port}` : s.customUrl ? s.hostname : `:${port}`}
           </TruncatedText>
         ) : (
-          <TruncatedText text={statusLabel(s)} className="text-xs text-muted-foreground" />
+          <TruncatedText text={down ? `last known: ${statusLabel(s)}` : statusLabel(s)} className="text-xs text-muted-foreground" />
         )}
         <div className="ml-auto flex shrink-0 items-center gap-0.5 friendly:gap-px studio:text-muted-foreground studio:opacity-70 studio:transition-opacity studio:duration-150 studio:group-hover/tile:opacity-100 studio:focus-within:opacity-100">
           <IconAction label={searching ? "Close search" : "Search logs"} onClick={() => (searching ? closeSearch() : setSearching(true))}>
@@ -171,15 +186,15 @@ export function ServerTile({
           )}
           {active ? (
             <>
-              <IconAction label="Restart" onClick={() => act("restart", s)}>
+              <IconAction label={`Restart${paused}`} disabled={down} onClick={() => act("restart", s)}>
                 <RotateCwIcon />
               </IconAction>
-              <IconAction label="Stop" onClick={() => act("stop", s)} className="hover:text-destructive">
+              <IconAction label={`Stop${paused}`} disabled={down} onClick={() => act("stop", s)} className="hover:text-destructive">
                 <SquareIcon />
               </IconAction>
             </>
           ) : (
-            <IconAction label="Start" onClick={() => act("start", s, startProfile)}>
+            <IconAction label={`Start${paused}`} disabled={down} onClick={() => act("start", s, startProfile)}>
               <PlayIcon />
             </IconAction>
           )}

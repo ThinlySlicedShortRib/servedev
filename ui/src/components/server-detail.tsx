@@ -43,10 +43,16 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Spinner } from "@/components/ui/spinner"
+import { MachineIcon, RetryButton } from "@/components/machine-ui"
+import { useMachines } from "@/hooks/use-machines"
+import { localPortOf, machineKind, remotePortOf } from "@/lib/machines"
 import { ACTIVE, ago, api, openUrl, statusLabel, type Server } from "@/lib/api"
 import type { Entry } from "@/lib/entries"
 
 type Action = "start" | "restart" | "stop" | "remove"
+
+const warnText = "text-amber-700 dark:text-amber-400 terminal:text-warning studio:text-warning-foreground friendly:text-status-starting-foreground"
 
 function tildify(p: string) {
   return p.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~")
@@ -66,10 +72,16 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
   const [tab, setTab] = React.useState<"logs" | "processes" | "preview">("logs")
   const [editingHost, setEditingHost] = React.useState(false)
   const [savingConfig, setSavingConfig] = React.useState(false)
-  const href = openUrl(s)
+  // On another machine: while it isn't connected this is the last known state, and actions wait.
+  const machine = useMachines().get(s?.machine)
+  const down = !!s?.machine && (s.stale || (!!machine && machine.state !== "connected"))
+  const locked = !!busy || down
+  const href = down ? undefined : openUrl(s)
+  const remotePort = s?.machine ? remotePortOf(s) : undefined
+  const localPort = s?.machine ? localPortOf(s) : undefined
   const groups = useProcessGroups(
     s?.id,
-    active,
+    active && !down,
     tab === "processes" ? 2000 : 5000
   )
   const processCount = groups?.reduce((n, g) => n + g.processes.length, 0) ?? 0
@@ -111,13 +123,17 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
         id: s.id,
         pinned: !s.pinned,
       })
-      if (s.pinned)
+      if (s.machine)
+        toast.success(`${s.pinned ? "Unpinned" : "Pinned"} ${s.name} on ${s.machine}`, {
+          description: s.pinned ? `It no longer starts when servedev starts on ${s.machine}.` : `It starts when servedev starts on ${s.machine}.`,
+        })
+      else if (s.pinned)
         toast.success(`Unpinned ${s.name}`, {
           description: "It no longer starts when you log in.",
         })
       else
         toast.success(`Pinned ${s.name}`, {
-          description: r.autostart.supported
+          description: r.autostart?.supported
             ? "It starts automatically when you log in."
             : "Starting at login is only supported on macOS.",
         })
@@ -151,20 +167,36 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               {studio && <StatusDot status={entry.status} className="size-1.5" />}
               {friendly && <StatusDot status={s?.status ?? "idle"} />}
               {terminal && s && (s.status === "starting" || s.status === "stopping") && <StatusDot status={s.status} />}
-              {s ? statusLabel(s) : "not started"}
+              {s ? (down ? `last known: ${statusLabel(s)}` : statusLabel(s)) : "not started"}
             </Badge>
+            {s?.machine && (
+              <Hint label={`It runs on ${s.machine}${machine?.os ? ` (${machine.os})` : ""}; servedev here reaches it over SSH`}>
+                <span className={cn("flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground", machine?.state === "offline" && "opacity-70")}>
+                  <MachineIcon machine={machine} className="size-3.5 shrink-0" />
+                  <span className="truncate">
+                    on {s.machine}
+                    {machine && machineKind(machine) ? ` · ${machineKind(machine)}` : ""}
+                  </span>
+                </span>
+              </Hint>
+            )}
           </div>
-          <div className="flex flex-wrap gap-2 studio:gap-1.5">
+          <div className={cn("flex flex-wrap gap-2 studio:gap-1.5", down && "opacity-60")} aria-disabled={down || undefined}>
             {s && (
               <Hint
                 label={
-                  s.pinned
-                    ? "Unpin: move it back into its project and stop starting it when you log in"
-                    : "Pin: keep it at the top of the list and start it automatically when you log in"
+                  s.machine
+                    ? s.pinned
+                      ? `Unpin on ${s.machine}: stop starting it when servedev starts there`
+                      : `Pin on ${s.machine}: start it whenever servedev starts there`
+                    : s.pinned
+                      ? "Unpin: move it back into its project and stop starting it when you log in"
+                      : "Pin: keep it at the top of the list and start it automatically when you log in"
                 }
               >
                 <Button
                   variant="ghost"
+                  disabled={locked}
                   onClick={togglePin}
                   aria-pressed={!!s.pinned}
                 >
@@ -195,7 +227,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
                   <Button
                     variant="outline"
                     onClick={() => run("restart")}
-                    disabled={!!busy}
+                    disabled={locked}
                   >
                     <RotateCwIcon data-icon="inline-start" />
                     {busy === "restart" ? "Restarting…" : "Restart"}
@@ -205,7 +237,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
                   <Button
                     variant="destructive"
                     onClick={() => run("stop")}
-                    disabled={!!busy}
+                    disabled={locked}
                   >
                     <SquareIcon data-icon="inline-start" />
                     {busy === "stop" ? "Stopping…" : "Stop"}
@@ -215,7 +247,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
             ) : (
               <>
                 <Hint label="Start it with its saved command, folder and environment">
-                  <Button onClick={() => run("start")} disabled={!!busy}>
+                  <Button onClick={() => run("start")} disabled={locked}>
                     <PlayIcon data-icon="inline-start" />
                     {busy === "start" ? "Starting…" : "Start"}
                   </Button>
@@ -226,7 +258,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               <AlertDialog>
                 <Hint label="Remove it from servedev: stops it if it's running and deletes its logs and run history. Nothing on disk is deleted. (Asks first.)">
                   <AlertDialogTrigger
-                    render={<Button variant="ghost" disabled={!!busy} />}
+                    render={<Button variant="ghost" disabled={locked} />}
                   >
                     <Trash2Icon data-icon="inline-start" />
                     Remove
@@ -262,7 +294,38 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
         </div>
 
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1.5 text-sm studio:gap-x-8 studio:gap-y-2 studio:leading-5 friendly-rise friendly:items-baseline friendly:gap-y-2 friendly:rounded-2xl friendly:border friendly:bg-card friendly:px-5 friendly:py-3.5 friendly:shadow-xs friendly:@2xl/detail:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] friendly:@4xl/detail:gap-x-8 friendly:[&_dt]:text-[13px] friendly:[&_dt]:font-semibold">
-          {s && (s.url || s.hostname) && (
+          {s?.machine && (s.url || s.customUrl || (down && remotePort)) && (
+            <>
+              <dt className="text-muted-foreground">URL</dt>
+              <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {/* Its name here, through this machine's proxy, then where that goes on its own machine. */}
+                {href ? (
+                  <a href={href} target="_blank" rel="noopener" className="font-mono underline-offset-4 hover:underline studio:text-xs">
+                    {href}
+                  </a>
+                ) : (
+                  <span className="font-mono text-muted-foreground studio:text-xs">{s.localHostname ? `http://${s.localHostname}` : "not reachable now"}</span>
+                )}
+                {remotePort && (
+                  <Hint
+                    label={
+                      down
+                        ? `It listened on ${s.machine}:${remotePort}; forwarding resumes when ${s.machine} reconnects`
+                        : localPort && localPort !== remotePort
+                          ? `${remotePort} is busy here, so servedev forwards ${s.machine}:${remotePort} to localhost:${localPort}. The name stays the same.`
+                          : `Forwarded from ${s.machine}:${remotePort} to the same port here`
+                    }
+                  >
+                    <span className="font-mono text-muted-foreground studio:text-xs">
+                      → {s.machine}:{remotePort}
+                      {!down && localPort && localPort !== remotePort && <span className={warnText}> at localhost:{localPort} here</span>}
+                    </span>
+                  </Hint>
+                )}
+              </dd>
+            </>
+          )}
+          {s && !s.machine && (s.url || s.hostname) && (
             <>
               <dt className="text-muted-foreground">URL</dt>
               <dd className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -381,10 +444,11 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               <dt className="text-muted-foreground">Directory</dt>
               <dd className="font-mono break-all studio:text-xs studio:leading-5">
                 {tildify(s?.cwd ?? entry.configured!.root)}
+                {s?.machine && <span className="font-sans text-muted-foreground"> on {s.machine}</span>}
               </dd>
             </>
           )}
-          {active && (
+          {active && !down && (
             <>
               <dt className="text-muted-foreground">PID</dt>
               <dd className="font-mono studio:text-xs studio:leading-5">{s.pid}</dd>
@@ -423,6 +487,25 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           )}
         </dl>
 
+        {s?.machine && down && machine?.state === "offline" && (
+          <Alert className="friendly-rise">
+            <TriangleAlertIcon />
+            <AlertTitle>{s.machine} is offline</AlertTitle>
+            <AlertDescription className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>
+                This is what servedev last saw{machine.lastSeen ? `, ${ago(machine.lastSeen, now)} ago` : ""}. Start, stop and new logs come back when it
+                reconnects.
+              </span>
+              <RetryButton machine={machine} label="Retry now" />
+            </AlertDescription>
+          </Alert>
+        )}
+        {s?.machine && down && machine?.state !== "offline" && (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+            <Spinner className="size-3.5" />
+            {machine?.state === "connecting" ? "Connecting" : "Reconnecting"} to {s.machine}… actions are paused until it's back.
+          </p>
+        )}
         {s && !active && s.status === "crashed" && (
           <Alert variant="destructive" className="friendly-rise">
             <TriangleAlertIcon />

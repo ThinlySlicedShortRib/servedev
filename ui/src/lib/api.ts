@@ -287,8 +287,8 @@ export const ACTIVE: Status[] = ["starting", "running", "stopping"]
 
 // The daemon injects the token into index.html; in `vite dev` it comes from ~/.servedev/token.
 export const TOKEN =
-  __DEV_TOKEN__ ||
-  document.querySelector<HTMLMetaElement>('meta[name="servedev-token"]')?.content ||
+  (typeof __DEV_TOKEN__ === "string" ? __DEV_TOKEN__ : "") ||
+  (typeof document === "undefined" ? undefined : document.querySelector<HTMLMetaElement>('meta[name="servedev-token"]')?.content) ||
   ""
 
 export async function api<T = unknown>(path: string, body?: unknown): Promise<T> {

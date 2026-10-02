@@ -40,6 +40,8 @@ import { AccountsContext, ActiveProfileContext, useAccounts } from "@/hooks/use-
 import { useCustomGrid } from "@/hooks/use-custom-grid"
 import { useExternalServers } from "@/hooks/use-external"
 import { useNow, useServedev } from "@/hooks/use-servedev"
+import { MachinesContext, useMachinesInfo } from "@/hooks/use-machines"
+import { MachinesSheet } from "@/components/machines-sheet"
 import { toast } from "sonner"
 
 import { ACTIVE, CLIENT_ID, api, openUrl, type Profile } from "@/lib/api"
@@ -68,7 +70,8 @@ function loadProfileId(): string | null {
 }
 
 export function App() {
-  const { servers, configured, profiles, config, connected, layoutChange, accountsVersion } = useServedev()
+  const { servers, configured, profiles, config, connected, layoutChange, accountsVersion, machines: machineMap } = useServedev()
+  const machines = useMachinesInfo(machineMap)
   const accounts = useAccounts(accountsVersion)
   const now = useNow()
   const styleId = useStyleId()
@@ -108,6 +111,11 @@ export function App() {
     : { scope: "all servers", ids: entries.flatMap((e) => (e.server ? [e.server.id] : [])) }
   const bulkServers = bulk.ids.flatMap((id) => (servers.get(id) ? [servers.get(id)!] : []))
   const [savingGrid, setSavingGrid] = React.useState(false)
+  // Profiles (and so their grids) can't hold another machine's servers yet; the unsaved grid can.
+  const gridBlocked = (id: string) =>
+    activeProfile && servers.get(id)?.machine
+      ? `Profiles can't include servers on other machines yet. Switch to the unsaved grid (no profile) to put ${servers.get(id)!.name} on a grid.`
+      : undefined
 
   const [editing, setEditing] = React.useState<{ profile?: Profile } | null>(null)
   const [deleting, setDeleting] = React.useState<Profile | null>(null)
@@ -215,6 +223,7 @@ export function App() {
   }
 
   return (
+    <MachinesContext.Provider value={machines}>
     <AccountsContext.Provider value={accounts}>
     <ActiveProfileContext.Provider value={activeProfile}>
     <SidebarProvider defaultOpen={!document.cookie.includes("sidebar_state=false")}>
@@ -240,7 +249,12 @@ export function App() {
           </>
         }
         onRemoveProject={(project, projectEntries) => setRemovingProject({ project, entries: projectEntries })}
-        grid={view === "grid" ? { ids: grid.ids, onToggle: (id) => (grid.ids.has(id) ? grid.remove(id) : grid.add(id)) } : undefined}
+        grid={
+          view === "grid"
+            ? { ids: grid.ids, onToggle: (id) => (grid.ids.has(id) ? grid.remove(id) : grid.add(id)), blocked: (s) => gridBlocked(s.id) }
+            : undefined
+        }
+        byMachine={machines.hasRemotes && !listProfile}
         selected={current?.key ?? null}
         onSelect={select}
         connected={connected}
@@ -262,12 +276,13 @@ export function App() {
                   : `${activeProfile.name}: changes save to the profile`
                 : "Unsaved grid"
               : current
-                ? `${current.project} / ${current.name}`
+                ? `${current.server?.machine ? `${current.server.machine} / ` : ""}${current.project} / ${current.name}`
                 : "Dev servers"}
           />
           <div className="ml-auto flex items-center gap-2 studio:gap-1.5">
             <AppearanceMenu />
             <AccountsSheet />
+            <MachinesSheet servers={servers} />
             {view === "grid" && activeProfile?.kind === "shared" && (
               <DropdownMenu>
                 <Hint label="This grid's layout: yours, or the repo's default everyone starts from">
@@ -343,7 +358,11 @@ export function App() {
               servers={servers}
               selected={current?.key ?? null}
               onLayout={grid.applyLayout}
-              onDropServer={grid.add}
+              onDropServer={(id, at) => {
+                const why = gridBlocked(id)
+                if (why) toast.info(`${servers.get(id)?.name ?? id} can't go on this grid`, { description: why })
+                else grid.add(id, at)
+              }}
               onRemove={grid.remove}
               onOpenDetails={(id) => {
                 select(id)
@@ -477,6 +496,7 @@ export function App() {
     </SidebarProvider>
     </ActiveProfileContext.Provider>
     </AccountsContext.Provider>
+    </MachinesContext.Provider>
   )
 }
 

@@ -62,7 +62,7 @@ export function ProfileDialog({
     setDescription(profile?.description ?? "")
     // A new profile starts from whatever is running now.
     setMembers(
-      profile ? profile.members : [...servers.values()].filter((s) => ACTIVE.includes(s.status)).map((s) => s.id)
+      profile ? profile.members : [...servers.values()].filter((s) => ACTIVE.includes(s.status) && !s.machine).map((s) => s.id)
     )
     setSkipped(profile?.skipped ?? [])
     setAccounts((profile?.kind === "shared" ? profile.mine : profile?.accounts) ?? {})
@@ -74,7 +74,8 @@ export function ProfileDialog({
 
   // A shared profile can only hold its own repo's (worktree's) servers.
   const choices = React.useMemo(
-    () => [...servers.values()].filter((s) => !shared || s.project === profile!.project),
+    // Another machine's servers can't be in a profile yet.
+    () => [...servers.values()].filter((s) => !s.machine && (!shared || s.project === profile!.project)),
     [servers, shared, profile]
   )
   const byProject = React.useMemo(() => {
@@ -187,6 +188,7 @@ export function ProfileDialog({
               <FieldDescription>
                 They start in the order you tick them, so tick an API before the apps that use it.
                 {shared && " Only this repo's servers can be in a shared profile. Turn off the switch to skip one yourself without changing it for the team."}
+                {[...servers.values()].some((s) => s.machine) && " Servers on other machines can't be in a profile yet."}
               </FieldDescription>
               {choices.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No servers yet. Start one, then add it here.</p>

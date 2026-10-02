@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { ACTIVE, api, type Server } from "@/lib/api"
+import { MachineTag } from "@/components/machine-ui"
+import { useMachines } from "@/hooks/use-machines"
 
 const plural = (n: number) => `${n} ${n === 1 ? "server" : "servers"}`
 
@@ -25,8 +27,14 @@ const plural = (n: number) => `${n} ${n === 1 ? "server" : "servers"}`
  */
 export function BulkActions({ servers, scope, profileId }: { servers: Server[]; scope: string; profileId?: string }) {
   const [confirm, setConfirm] = React.useState<"start" | "stop" | null>(null)
-  const toStart = servers.filter((s) => !ACTIVE.includes(s.status))
-  const toStop = servers.filter((s) => s.status === "running" || s.status === "starting")
+  // Servers on a machine that isn't connected are left out (and named in the dialog).
+  const machines = useMachines()
+  const unreachable = servers.filter((s) => s.machine && (s.stale || machines.get(s.machine)?.state !== "connected"))
+  const reachable = servers.filter((s) => !unreachable.includes(s))
+  const toStart = reachable.filter((s) => !ACTIVE.includes(s.status))
+  const toStop = reachable.filter((s) => s.status === "running" || s.status === "starting")
+  const skipped = [...new Set(unreachable.map((s) => s.machine!))]
+  const severalMachines = new Set((confirm === "start" ? toStart : toStop).map((s) => s.machine ?? "")).size > 1
   const targets = confirm === "start" ? toStart : toStop
   // "all 4 running servers" or "the 2 running servers in Keel stack"
   const where = (n: number, state: string) =>
@@ -84,7 +92,7 @@ export function BulkActions({ servers, scope, profileId }: { servers: Server[]; 
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm === "start"
-                ? "They start one at a time, in this order, each after the previous one is ready. Servers that are already running are left alone."
+                ? `They start one at a time, in this order, each after the previous one is ready${severalMachines ? " (each machine starts its own, alongside the others)" : ""}. Servers that are already running are left alone.`
                 : "Each server and every process it started is shut down. Logs are kept, and you can start them again any time."}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -94,9 +102,15 @@ export function BulkActions({ servers, scope, profileId }: { servers: Server[]; 
                 <StatusDot status={s.status} />
                 <span className="font-medium">{s.name}</span>
                 <TruncatedText text={s.project} className="text-muted-foreground" />
+                {s.machine && machines.get(s.machine) && <MachineTag machine={machines.get(s.machine)!} className="ml-auto" />}
               </li>
             ))}
           </ul>
+          {skipped.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Left out: the servers on {skipped.map((m) => `${m} (${machines.get(m)?.state ?? "offline"})`).join(", ")}, which can't be reached right now.
+            </p>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant={confirm === "stop" ? "destructive" : "default"} onClick={run}>

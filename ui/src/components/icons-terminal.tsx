@@ -123,6 +123,10 @@ const G = {
   lock:      ["..###..", ".#...#.", ".#...#.", "#######", "###.###", "###.###", "#######"],
   terminal:  ["#######", "#.....#", "#.#...#", "#..#..#", "#.#.###", "#.....#", "#######"],
   monitor:   ["#######", "#.....#", "#.....#", "#.....#", "#######", "...#...", "..###.."],
+  laptop:    [".......", ".#####.", ".#...#.", ".#...#.", ".#####.", "#######", "......."],
+  hardDrive: [".......", ".......", "#######", "#.....#", "#...#.#", "#######", "......."],
+  power:     ["...#...", ".#.#.#.", "#..#..#", "#.....#", "#.....#", ".#...#.", "..###.."],
+  circle:    ["..###..", ".#...#.", "#.....#", "#.....#", "#.....#", ".#...#.", "..###.."],
   sun:       ["...#...", ".#...#.", "..###..", "#.###.#", "..###..", ".#...#.", "...#..."],
   moon:      ["..###..", ".###...", "###....", "###....", "###...#", ".######", "..###.."],
   palette:   ["..###..", ".#...#.", "#.#...#", "#....##", "#.#..#.", ".#..#..", "..##..."],
@@ -181,6 +185,10 @@ export const LinkIcon = pixel("link", G.link)
 export const LockIcon = pixel("lock", G.lock)
 export const TerminalIcon = pixel("terminal", G.terminal)
 export const MonitorIcon = pixel("monitor", G.monitor)
+export const LaptopIcon = pixel("laptop", G.laptop)
+export const HardDriveIcon = pixel("hard-drive", G.hardDrive)
+export const CircleIcon = pixel("circle", G.circle)
+export const PowerIcon = pixel("power", G.power)
 export const SunIcon = pixel("sun", G.sun)
 export const MoonIcon = pixel("moon", G.moon)
 export const PaletteIcon = pixel("palette", G.palette)
