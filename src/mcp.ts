@@ -5,6 +5,7 @@ import {
   opBulk,
   opConfig,
   opGetGrid,
+  opEdit,
   opHostname,
   opInspect,
   opList,
@@ -182,6 +183,23 @@ export const TOOLS = [
       'Give a server a custom URL like http://keel.localhost (servedev proxies it to the server\'s current port), or remove it. ' +
       "*.localhost names work without any setup.",
     inputSchema: obj({ name: serverRef, hostname: { type: "string", description: 'e.g. "keel.localhost". Omit or empty to remove.' }, ...cwdProp }, ["name"]),
+  },
+  {
+    name: "edit_server",
+    description:
+      "Change how a server starts without starting it: its command and/or its setup step (runs before the command on every start). " +
+      "Kept in your config.json, on top of the repo's servedev.json if it defines the server. A running server keeps its old command " +
+      "until restarted; pass restart=true to restart it now.",
+    inputSchema: obj(
+      {
+        name: serverRef,
+        command: { type: "string", description: 'e.g. "pnpm --filter web dev". May contain {port}.' },
+        setup: { type: "string", description: 'e.g. "pnpm install". Empty string removes it.' },
+        restart: { type: "boolean", description: "Restart it now if it's running." },
+        ...cwdProp,
+      },
+      ["name"],
+    ),
   },
   {
     name: "inspect_folder",
@@ -599,6 +617,8 @@ export async function callTool(name: string, a: Args): Promise<OpResult> {
       return opPin({ cwd, name: a.name, pinned: a.pinned !== false });
     case "set_hostname":
       return opHostname({ cwd, name: a.name, hostname: a.hostname || undefined, clear: !a.hostname });
+    case "edit_server":
+      return opEdit({ cwd, name: ref()!, command: a.command, setup: a.setup, restart: a.restart });
     case "inspect_folder":
       return opInspect({ cwd, path: a.path, machine: a.machine || undefined });
     case "list_folders":

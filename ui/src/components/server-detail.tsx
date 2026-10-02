@@ -3,6 +3,7 @@ import {
   ExternalLinkIcon,
   LinkIcon,
   LockIcon,
+  PencilIcon,
   PinIcon,
   PinOffIcon,
   PlayIcon,
@@ -24,6 +25,7 @@ import { useStartProfile } from "@/hooks/use-accounts"
 import { BranchTag } from "@/components/branch-tag"
 import { Hint } from "@/components/hint"
 import { HostnameDialog } from "@/components/hostname-dialog"
+import { CommandDialog } from "@/components/command-dialog"
 import { SaveConfigDialog } from "@/components/save-config-dialog"
 import { AppPreview } from "@/components/app-preview"
 import { LogView } from "@/components/log-view"
@@ -71,6 +73,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
   const statusFx = useStatusFx(s?.status, friendly)
   const [tab, setTab] = React.useState<"logs" | "processes" | "preview">("logs")
   const [editingHost, setEditingHost] = React.useState(false)
+  const [editingCommand, setEditingCommand] = React.useState(false)
   const [savingConfig, setSavingConfig] = React.useState(false)
   // On another machine: while it isn't connected this is the last known state, and actions wait.
   const machine = useMachines().get(s?.machine)
@@ -418,7 +421,23 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
             </>
           )}
           <dt className="text-muted-foreground">Command</dt>
-          <dd className="font-mono break-all studio:text-xs studio:leading-5">{command}</dd>
+          <dd className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span className="font-mono break-all studio:text-xs studio:leading-5">{command}</span>
+            {s && (
+              <Hint label="Change the command, or the setup step that runs before it">
+                <Button variant="link" size="xs" className="h-auto px-0" disabled={down} onClick={() => setEditingCommand(true)}>
+                  <PencilIcon data-icon="inline-start" />
+                  Edit
+                </Button>
+              </Hint>
+            )}
+          </dd>
+          {s?.setup && (
+            <>
+              <dt className="text-muted-foreground">Setup</dt>
+              <dd className="font-mono break-all studio:text-xs studio:leading-5">{s.setup}</dd>
+            </>
+          )}
           {(s?.branch ?? entry.configured?.branch) && (
             <>
               <dt className="text-muted-foreground">Branch</dt>
@@ -531,6 +550,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           onOpenChange={setEditingHost}
         />
       )}
+      {s && <CommandDialog server={s} open={editingCommand} onOpenChange={setEditingCommand} />}
       {s && <SaveConfigDialog server={s} open={savingConfig} onOpenChange={setSavingConfig} />}
       <Tabs
         value={tab}

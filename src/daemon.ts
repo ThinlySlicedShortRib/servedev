@@ -1704,7 +1704,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   // ---------- other machines ----------
 
   /** Requests about one server that take its id or name: relayed when it's on another machine. */
-  const SERVER_POSTS = new Set(["/api/start", "/api/stop", "/api/restart", "/api/remove", "/api/pin", "/api/hostname", "/api/wait", "/api/config"]);
+  const SERVER_POSTS = new Set(["/api/start", "/api/stop", "/api/restart", "/api/remove", "/api/pin", "/api/hostname", "/api/command", "/api/wait", "/api/config"]);
   const SERVER_GETS = new Set(["/api/logs", "/api/processes", "/api/runs", "/api/config"]);
 
   /**
@@ -1903,6 +1903,26 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         proxy: proxyStatus(),
         note: resolvesLocally ? undefined : `${hostname} doesn't point at this Mac by itself; add "127.0.0.1 ${hostname}" to /etc/hosts, or use a .localhost name.`,
       };
+    }
+    if (p === "/api/command" && req.method === "POST") {
+      const s = resolveRef(body.root, body.id ?? body.name, true);
+      // The dashboard only ever sees commands with secrets masked (`--token=…`): sending that back
+      // unchanged keeps the real value, and an edit that still holds a mask would save the mask.
+      const edited = (field: "command" | "setup", label: string): string | undefined => {
+        const value = typeof body[field] === "string" ? body[field].trim() : undefined;
+        const current = s[field] ?? "";
+        if (value === undefined || value === current || value === maskSecrets(current)) return undefined;
+        if (maskSecrets(current) !== current && value.includes("…"))
+          throw new HttpError(400, `the ${label} had hidden values (shown as …); type them in full, or leave the ${label} as it was`);
+        return value;
+      };
+      const command = edited("command", "command");
+      if (command === "") throw new HttpError(400, "command can't be empty");
+      const setup = edited("setup", "setup step");
+      configCall(() => writeServer(s.project, s.root, s.name, { command, setup: setup === "" ? null : setup }));
+      reconcile();
+      // The running process keeps the command it started with; a restart uses the new one.
+      return { server: view(s) };
     }
     if (p === "/api/proxy") {
       return {

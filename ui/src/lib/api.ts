@@ -8,6 +8,8 @@ export interface Server {
   project: string
   root: string
   command: string
+  /** Runs before command on every start. */
+  setup?: string
   cwd: string
   port?: number
   status: Status

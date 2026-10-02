@@ -792,6 +792,16 @@ export async function opProfile(a: {
   }
 }
 
+export async function opEdit(a: { cwd: string; name: string; command?: string; setup?: string; restart?: boolean }): Promise<OpResult> {
+  if (a.command === undefined && a.setup === undefined) throw new Error("nothing to change: pass a command and/or a setup step");
+  const r = await api<{ server: PublicServer }>("/api/command", { root: findRoot(a.cwd), name: a.name, command: a.command, setup: a.setup });
+  const s = r.server;
+  const lines = [`${s.id} starts with: ${s.command}`, s.setup ? `setup: ${s.setup}` : "no setup step"];
+  if (a.restart && ["starting", "running"].includes(s.status)) return opRestart({ cwd: a.cwd, name: s.id });
+  if (["starting", "running"].includes(s.status)) lines.push("It's still running the old command; restart it to use the new one.");
+  return { ok: true, text: lines.join("\n"), data: r };
+}
+
 export async function opHostname(a: { cwd: string; name?: string; hostname?: string; clear?: boolean }): Promise<OpResult> {
   if (!a.name) {
     const r = await api<{ running: boolean; port?: number; error?: string; hostnames: { hostname: string; id: string; url?: string }[] }>("/api/proxy");

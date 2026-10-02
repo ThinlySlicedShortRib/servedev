@@ -174,7 +174,7 @@ MCP tools cover everything the dashboard can do, so you can ask an agent to "mak
 
 | Area | Tools |
 |---|---|
-| Servers | `start_server`, `list_servers` (includes servers running outside servedev), `server_status`, `restart_server`, `stop_server`, `remove_server`, `pin_server`, `set_hostname`, `inspect_folder` |
+| Servers | `start_server`, `list_servers` (includes servers running outside servedev), `server_status`, `restart_server`, `stop_server`, `edit_server`, `remove_server`, `pin_server`, `set_hostname`, `inspect_folder` |
 | Logs | `server_logs`, `search_logs` (all servers at once, `preset: "errors"`), `server_runs` |
 | Several servers | `start_servers`, `stop_servers` (a profile, a list, or `all: true`) |
 | Profiles | `list_profiles`, `create_profile`, `update_profile`, `delete_profile`, `start_profile` |
