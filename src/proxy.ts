@@ -7,6 +7,7 @@
  * all interfaces and rejects every request that doesn't come from this machine.
  */
 import type { Server as BunServer, ServerWebSocket } from "bun";
+import { DAEMON_URL } from "./paths";
 
 export type Route =
   | { status: "ok"; port: number; serverId: string }
@@ -38,7 +39,7 @@ function page(status: number, title: string, body: string): Response {
   return new Response(
     `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title>` +
       `<body style="font:15px/1.5 system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem"><h1 style="font-size:1.25rem">${esc(title)}</h1>${body}` +
-      `<p style="color:#777">servedev hostname proxy. Manage servers at <a href="http://127.0.0.1:7777">127.0.0.1:7777</a>.</p>`,
+      `<p style="color:#777">servedev hostname proxy. Manage servers at <a href="${DAEMON_URL}">${DAEMON_URL.replace("http://", "")}</a>.</p>`,
     { status, headers: { "content-type": "text/html; charset=utf-8" } },
   );
 }
