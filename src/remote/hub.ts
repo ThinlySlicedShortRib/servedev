@@ -172,6 +172,7 @@ export class RemoteHub extends EventEmitter {
       localPort: f.localPort,
       target: f.target,
       serverIds: servers.filter((s) => s.ports.includes(remotePort)).map((s) => remoteId(m.name, s.id)),
+      outside: m.outside.filter((o) => o.ports.includes(remotePort)).map((o) => o.command),
     }));
     return {
       name: m.name,

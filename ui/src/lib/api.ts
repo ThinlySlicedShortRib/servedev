@@ -86,7 +86,8 @@ export interface Machine {
   remotePort?: number
   apiPort?: number
   counts: { total: number; running: number; crashed: number }
-  forwards: { remotePort: number; localPort: number; target: string; serverIds: string[] }[]
+  /** outside: commands of dev servers there that its servedev didn't start (missing from older versions). */
+  forwards: { remotePort: number; localPort: number; target: string; serverIds: string[]; outside?: string[] }[]
   steps?: SetupStep[]
 }
 

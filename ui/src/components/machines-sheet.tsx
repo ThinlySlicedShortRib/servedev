@@ -327,7 +327,7 @@ function MachineCard({ m, now, onRemove, onBoot, onShowOnly }: { m: Machine; now
             <dt className="text-muted-foreground">Ports</dt>
             <dd className="flex flex-col gap-0.5 font-mono">
               {m.forwards.map((f) => (
-                <Hint key={f.remotePort} label={`${f.serverIds.join(", ")}: ${m.name}:${f.remotePort} forwarded to localhost:${f.localPort} here`}>
+                <Hint key={f.remotePort} label={`${[...f.serverIds, ...(f.outside ?? []).map((c) => `${c} (started outside servedev)`)].join(", ")}: ${m.name}:${f.remotePort} forwarded to localhost:${f.localPort} here`}>
                   <span className="truncate">
                     {m.name}:{f.remotePort}
                     <span className="text-muted-foreground"> → </span>

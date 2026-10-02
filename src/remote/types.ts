@@ -64,7 +64,8 @@ export interface MachineSummary {
   remotePort?: number;
   apiPort?: number;
   counts: { total: number; running: number; crashed: number };
-  forwards: (Forward & { target: string; serverIds: string[] })[];
+  /** `outside`: commands of dev servers there that its servedev didn't start, on this port. */
+  forwards: (Forward & { target: string; serverIds: string[]; outside: string[] })[];
   /** The last connection attempt's checklist. */
   steps?: SetupStep[];
 }

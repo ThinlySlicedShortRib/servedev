@@ -42,6 +42,8 @@ interface Cache {
 }
 
 const HEALTH_EVERY = 15_000;
+/** How often to look for dev servers started there outside servedev, whose ports get forwarded too. */
+const OUTSIDE_EVERY = 5_000;
 
 export class Machine extends EventEmitter {
   status: ConnStatus;
@@ -51,6 +53,8 @@ export class Machine extends EventEmitter {
   profiles: ProfileView[] = [];
   /** Remote port -> its forward here, and the loopback address it reaches there. */
   readonly forwards = new Map<number, { localPort: number; target: Target }>();
+  /** Dev servers running there that its servedev didn't start (from a terminal, an agent): their ports are forwarded too. */
+  outside: { command: string; ports: number[] }[] = [];
   /** Server id -> hub hostname (api.pc.localhost). */
   aliases = new Map<string, string>();
   steps?: SetupStep[];
@@ -65,6 +69,7 @@ export class Machine extends EventEmitter {
   private hold?: LongProc;
   private events?: AbortController;
   private healthTimer?: ReturnType<typeof setInterval>;
+  private outsideTimer?: ReturnType<typeof setInterval>;
   private retryTimer?: ReturnType<typeof setTimeout>;
   /** Bumped on every connect and teardown, so callbacks from an old connection do nothing. */
   private generation = 0;
@@ -295,6 +300,16 @@ export class Machine extends EventEmitter {
         this.saveSoon();
       } else if (++misses >= 2) this.lost(gen, `servedev on ${this.name} stopped answering`);
     }, HEALTH_EVERY);
+    const lookOutside = async () => {
+      const r = await api.call<{ servers: { command: string; ports: number[] }[] }>("GET", "/api/external", undefined, 10_000).catch(() => undefined);
+      if (!r || gen !== this.generation) return;
+      const outside = r.servers.map((s) => ({ command: s.command, ports: s.ports }));
+      if (JSON.stringify(outside) === JSON.stringify(this.outside)) return;
+      this.outside = outside;
+      this.syncForwards();
+    };
+    void lookOutside();
+    this.outsideTimer = setInterval(lookOutside, OUTSIDE_EVERY);
   }
 
   private onEvent(event: string, data: string) {
@@ -373,6 +388,8 @@ export class Machine extends EventEmitter {
   private teardown() {
     this.generation++;
     clearInterval(this.healthTimer);
+    clearInterval(this.outsideTimer);
+    this.outside = [];
     this.events?.abort();
     this.events = undefined;
     this.hold?.kill();
@@ -433,7 +450,8 @@ export class Machine extends EventEmitter {
     const gen = this.generation;
     if (!this.connected || !link) return;
     const current = [...this.forwards].map(([remotePort, f]) => ({ remotePort, localPort: f.localPort }));
-    const { add, cancel } = diffForwards(current, wantedPorts([...this.servers.values()]));
+    const outside = this.outside.map((o) => ({ status: "running", ports: o.ports }));
+    const { add, cancel } = diffForwards(current, wantedPorts([...this.servers.values(), ...outside]));
     if (!add.length && !cancel.length) return;
     for (const f of cancel) {
       await link.cancel(f.localPort, f.remotePort, this.forwards.get(f.remotePort)?.target).catch(() => {});
@@ -478,6 +496,19 @@ export class Machine extends EventEmitter {
       if (o === keep) continue;
       await link.cancel(o.local, remote, o.target).catch(() => {});
       this.deps.reserved.delete(o.local);
+    }
+    // The address that answers had to make do with another port; now that the trial forward on the
+    // same number is gone, move it there (expo on WSL listens only on ::1).
+    if (keep.local !== remote && gen === this.generation && (await chooseLocalPort(remote, this.deps.reserved, probe)) === remote) {
+      this.deps.reserved.add(remote);
+      try {
+        await link.forward(remote, remote, keep.target);
+        await link.cancel(keep.local, remote, keep.target).catch(() => {});
+        this.deps.reserved.delete(keep.local);
+        keep.local = remote;
+      } catch {
+        this.deps.reserved.delete(remote);
+      }
     }
     this.keep(gen, remote, keep.local, keep.target);
   }
