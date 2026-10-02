@@ -238,7 +238,14 @@ export class RemoteHub extends EventEmitter {
     if (Array.isArray(out.servers)) out.servers = out.servers.map(asView);
     if (typeof out.removed === "string") out.removed = prefix(out.removed);
     for (const key of ["stopped", "starting"]) if (Array.isArray(out[key])) out[key] = out[key].map(prefix);
-    if (Array.isArray(out.results)) out.results = out.results.map((r: any) => (r && typeof r === "object" ? { ...r, id: prefix(r.id) } : r));
+    // Bulk start results carry the URL there; point it here when the port is forwarded already.
+    const here = (url: unknown) => {
+      if (typeof url !== "string") return url;
+      const port = Number(URL.canParse(url) ? new URL(url).port : 0);
+      const f = port ? m.forwards.get(port) : undefined;
+      return f ? localUrl(url, port, f.localPort) : url;
+    };
+    if (Array.isArray(out.results)) out.results = out.results.map((r: any) => (r && typeof r === "object" ? { ...r, id: prefix(r.id), ...("url" in r ? { url: here(r.url) } : {}) } : r));
     return out as T;
   }
 

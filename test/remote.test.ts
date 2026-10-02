@@ -377,11 +377,11 @@ test("hub views: prefixed ids, the forwarded URL here, last-known when offline; 
   expect(v.stale).toBeUndefined();
   expect(hub.route("api.pc.localhost")).toEqual({ status: "ok", port: 41000, serverId: "pc/demo:api" });
 
-  expect(hub.rewrite(m, { server: raw, removed: "demo:api", stopped: ["demo:api"], results: [{ id: "demo:api", ok: true }] })).toMatchObject({
+  expect(hub.rewrite(m, { server: raw, removed: "demo:api", stopped: ["demo:api"], results: [{ id: "demo:api", ok: true, url: "http://localhost:3000" }] })).toMatchObject({
     server: { id: "pc/demo:api" },
     removed: "pc/demo:api",
     stopped: ["pc/demo:api"],
-    results: [{ id: "pc/demo:api" }],
+    results: [{ id: "pc/demo:api", url: "http://127.0.0.1:41000" }],
   });
   const { local, remote } = hub.partition(["web", "pc/api", "pc/demo:api"]);
   expect(local).toEqual(["web"]);
