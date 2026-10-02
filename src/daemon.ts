@@ -40,6 +40,7 @@ import uiBundle from "../ui/dist/index.html" with { type: "text" };
 import { RemoteHub } from "./remote/hub";
 import { defaultSecretStore } from "./remote/secrets";
 import { assertMachineName } from "./remote/ids";
+import { listDirs } from "./dirs";
 import { BOOT_TASK, bootTaskPowerShell, encodedPowerShell, writeBootScript } from "./remote/boot";
 import { readSse } from "./remote/sse";
 import type { MachineSummary, RemoteServerView, SetupStep } from "./remote/types";
@@ -1546,12 +1547,15 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
    * and bring the answer back in hub terms. Undefined: not a remote server, handle it here.
    */
   async function relay(req: Request, p: string, q: URLSearchParams, body: Record<string, any>): Promise<object | Response | undefined> {
+    if (req.method === "POST" && p === "/api/start") {
+      const started = await hub.start(body);
+      if (started) return started;
+    }
+    if (req.method === "GET" && p === "/api/inspect" && q.get("machine")) return hub.inspect(q.get("machine")!, q.get("dir") ?? "");
+    if (req.method === "GET" && p === "/api/dirs" && q.get("machine")) return hub.dirs(q.get("machine")!, { path: q.get("path"), hidden: q.get("hidden"), limit: q.get("limit") });
     if (req.method === "POST" && SERVER_POSTS.has(p)) {
       const t = hub.target(body.id ?? body.name);
       if (!t) return undefined;
-      if (p === "/api/start" && (body.command || body.setup !== undefined || body.install || body.cwd)) {
-        throw new HttpError(400, `defining a server on ${t.machine.name} from here isn't supported yet; set it up there, then start it as ${t.machine.name}/${t.server.id}`);
-      }
       // root and the client's folder are this machine's paths; the remote knows the server by id.
       const { root: _root, name: _name, clientCwd: _cwd, id: _id, ...rest } = body;
       const data = await t.api.call("POST", p, { ...rest, id: t.server.id });
@@ -1916,6 +1920,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       return { server: s.id, ...plan, written: true };
     }
     if (p === "/api/inspect") return inspectDir(q.get("dir") ?? "");
+    if (p === "/api/dirs" && req.method === "GET") {
+      return listDirs(q.get("path"), { hidden: q.get("hidden") === "1" || q.get("hidden") === "true", limit: q.get("limit") ? Number(q.get("limit")) || undefined : undefined });
+    }
     if (p === "/api/pick-folder" && req.method === "POST") return { path: await pickFolder(body.start) };
     if (p === "/api/servers") return { servers: [...manager.list().map(view), ...hub.views()], configured: configured(), machines: hub.summaries() };
     if (p === "/api/start" && req.method === "POST") return start(body as StartRequest);

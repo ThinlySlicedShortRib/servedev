@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 export const HOME = process.env.SERVEDEV_HOME ?? path.join(os.homedir(), ".servedev");
 export const LOG_DIR = path.join(HOME, "logs");

@@ -2,6 +2,8 @@
  * Operations shared by the CLI and the MCP server. Each returns agent-friendly text
  * plus structured data; neither writes to stdout.
  */
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { api } from "./client";
 import type { ProcessGroup, RunInfo, SearchResponse, StartResponse } from "./daemon";
@@ -10,6 +12,8 @@ import type { PublicServer, ReadyResult } from "./manager";
 import { describeInstall } from "./install";
 import { findRoot, loadConfig, type ReadySpec } from "./project";
 import type { MachineSummary, RemoteServerView } from "./remote/types";
+import { hostLabel, splitRef } from "./remote/ids";
+import type { DirListing } from "./dirs";
 
 /** A server from /api/servers: this machine's, or (with `machine`) another machine's. */
 type AnyServer = PublicServer & Partial<Pick<RemoteServerView, "machine" | "remoteId" | "stale" | "remoteUrl" | "machineState" | "localHostname">>;
@@ -38,6 +42,13 @@ export interface StartArgs {
   env?: Record<string, string>;
   /** Profile whose accounts to use; "none" for this machine's. */
   profile?: string;
+  /**
+   * Folder to run it in, as if servedev were run there (default: cwd). On another machine, a path
+   * there: absolute or ~/... .
+   */
+  folder?: string;
+  /** Another machine (servedev remote ls) to start it on; a "pc/..." name says so too. */
+  machine?: string;
 }
 
 export const SYMBOL: Record<string, string> = {
@@ -66,9 +77,10 @@ export function describeRun(r: RunInfo): string {
   return `run #${r.id}, started ${ago(r.startedAt)} ago, ${end}`;
 }
 
-function where(s: PublicServer) {
-  if (s.customUrl) return ` at ${s.customUrl}${s.url ? ` (→ ${s.url.replace("http://", "")})` : ""}`;
-  return s.url ? ` at ${s.url}` : "";
+function where(s: AnyServer) {
+  const here = s.customUrl ? ` at ${s.customUrl}${s.url ? ` (→ ${s.url.replace("http://", "")})` : ""}` : s.url ? ` at ${s.url}` : "";
+  if (!s.machine) return here;
+  return `${here} on ${s.machine}${s.remoteUrl ? ` (${s.remoteUrl.replace("http://", "")} there)` : ""}`;
 }
 
 function describeStart(r: StartResponse, label: string): OpResult {
@@ -119,10 +131,50 @@ function indent(text: string) {
     .join("\n");
 }
 
+/**
+ * A folder on another machine as given here. The shell expands ~ before servedev sees it, so a
+ * path under this machine's home is taken as the same path under the home there.
+ */
+export function remoteFolder(p: string, home = os.homedir()): string {
+  const v = p.trim();
+  if (home && home !== "/" && (v === home || v.startsWith(home + "/"))) return `~${v.slice(home.length)}`;
+  return v;
+}
+
+/** Where a remote start's request goes: { machine, name } for "pc/api", --on pc, or machine: "pc". */
+function machineTarget(a: { name?: string; machine?: string }): { machine?: string; name?: string } {
+  const split = splitRef(a.name);
+  if (split && a.machine && split.machine !== a.machine) throw new Error(`${a.name} is on ${split.machine}, not ${a.machine}`);
+  return split ? { machine: split.machine, name: split.ref } : { machine: a.machine, name: a.name };
+}
+
 export async function opStart(a: StartArgs): Promise<OpResult> {
+  const target = machineTarget(a);
+  if (target.machine) {
+    const r = await api<StartResponse>("/api/start", {
+      machine: target.machine,
+      name: target.name,
+      dir: a.folder ? remoteFolder(a.folder) : undefined,
+      command: a.command,
+      setup: a.setup,
+      install: a.install,
+      hostname: a.hostname,
+      cwd: a.dir ? remoteFolder(a.dir) : undefined,
+      port: a.port,
+      ready: a.ready,
+      timeout: a.timeout,
+      wait: a.wait,
+      restart: a.restart,
+      vars: a.env,
+      profile: a.profile === "none" ? null : a.profile,
+    });
+    return describeStart(r, "is starting");
+  }
+  const here = a.folder ? path.resolve(a.cwd, a.folder.replace(/^~(?=$|\/)/, os.homedir())) : a.cwd;
+  if (a.folder && !fs.statSync(here, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`no folder at ${here}`);
   const r = await api<StartResponse>("/api/start", {
-    root: findRoot(a.cwd),
-    clientCwd: a.cwd,
+    root: findRoot(here),
+    clientCwd: here,
     name: a.name,
     command: a.command,
     setup: a.setup,
@@ -779,18 +831,40 @@ export async function opBulk(a: { cwd: string; action: "start" | "stop"; profile
 
 // ---------- folders ----------
 
-export async function opInspect(a: { cwd: string; path?: string }): Promise<OpResult> {
-  const dir = a.path ? (a.path.startsWith("/") || a.path.startsWith("~") ? a.path : `${a.cwd}/${a.path}`) : a.cwd;
-  const r = await api<any>(`/api/inspect?${new URLSearchParams({ dir })}`);
-  if (!r.exists) return { ok: false, text: `No folder at ${r.dir}.`, data: r };
+export async function opInspect(a: { cwd: string; path?: string; machine?: string }): Promise<OpResult> {
+  let q: URLSearchParams;
+  if (a.machine) {
+    if (!a.path) throw new Error(`pass the folder on ${a.machine} (absolute, or ~/...)`);
+    q = new URLSearchParams({ dir: remoteFolder(a.path), machine: a.machine });
+  } else q = new URLSearchParams({ dir: a.path ? (a.path.startsWith("/") || a.path.startsWith("~") ? a.path : `${a.cwd}/${a.path}`) : a.cwd });
+  const r = await api<any>(`/api/inspect?${q}`);
+  const on = a.machine ? ` on ${a.machine}` : "";
+  if (!r.exists) return { ok: false, text: `No folder at ${r.dir}${on}.`, data: r };
   const lines = [
-    `${r.dir} belongs to project ${r.project}${r.root !== r.dir ? ` (root ${r.root})` : ""}.`,
+    `${r.dir}${on} belongs to project ${r.project}${r.root !== r.dir ? ` (root ${r.root})` : ""}.`,
     r.detected ? `Detected command: ${r.detected.command} (from the ${r.detected.kind})` : "No dev script detected; pass a command to start_server.",
     r.install ? `Dependencies: ${r.install.detail} Install would run ${r.install.command.split(" --")[0]} in ${r.install.dir} (${r.install.reason}).` : "",
     r.configured?.length ? `Defined in servedev.json: ${r.configured.map((c: any) => `${c.name} (${c.command})`).join(", ")}` : "",
     r.existing?.length ? `Already known here: ${r.existing.map((e: any) => `${e.name} (${e.status})`).join(", ")}` : "",
     `Suggested name: ${r.suggestedName}`,
+    a.machine
+      ? `Start it there: start_server with machine "${a.machine}", dir "${r.dir}" (servedev start <name> --on ${a.machine} --dir ${r.dir} [-- <command>]). It opens here at ${(r.urlTemplate ?? "http://{host}").replace("{host}", hostLabel(r.suggestedName))}.`
+      : "",
   ].filter(Boolean);
+  return { ok: true, text: lines.join("\n"), data: r };
+}
+
+/** Subfolders of a folder (here, or on another machine), marking the ones that look like projects. */
+export async function opDirs(a: { cwd: string; path?: string; machine?: string; hidden?: boolean }): Promise<OpResult> {
+  const p = a.machine ? (a.path ? remoteFolder(a.path) : "~") : a.path ? path.resolve(a.cwd, a.path.replace(/^~(?=$|\/)/, os.homedir())) : a.cwd;
+  const r = await api<DirListing & { machine?: string }>(`/api/dirs?${new URLSearchParams({ path: p, ...(a.machine ? { machine: a.machine } : {}), ...(a.hidden ? { hidden: "1" } : {}) })}`);
+  const mark = (d: { package?: boolean; servedev?: boolean; git?: boolean }) =>
+    [d.servedev && "servedev.json", d.package && "package.json", d.git && "git"].filter(Boolean).join(", ");
+  const own = mark(r);
+  const lines = [
+    `${r.path}${a.machine ? ` on ${a.machine}` : ""}${own ? ` (${own})` : ""}: ${r.dirs.length} folder${r.dirs.length === 1 ? "" : "s"}${r.hidden ? `, ${r.hidden} hidden` : ""}${r.truncated ? " (more not shown)" : ""}`,
+    ...r.dirs.map((d) => `  ${d.name}/${mark(d) ? `  [${mark(d)}]` : ""}${d.link ? "  (link)" : ""}`),
+  ];
   return { ok: true, text: lines.join("\n"), data: r };
 }
 

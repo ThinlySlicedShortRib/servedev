@@ -39,8 +39,10 @@ import {
   opAccountCatalog,
   opAccountRemove,
   opAccountTest,
+  opDirs,
   type OpResult,
 } from "./ops";
+import { opRemoteList, opRemoteReconnect } from "./remote/ops";
 import { api } from "./client";
 import { VERSION } from "./paths";
 
@@ -48,7 +50,13 @@ const cwdProp = {
   cwd: { type: "string", description: "Project directory (defaults to the directory the MCP server was launched in)." },
 };
 
-const serverRef = { type: "string", description: 'Server name in this project, or a full id like "keel-review:dev".' };
+const serverRef = { type: "string", description: 'Server name in this project, or a full id like "keel-review:dev" (or "pc/demo:api" on another machine).' };
+const machineProp = {
+  machine: {
+    type: "string",
+    description: 'Another machine whose servedev this one relays (see list_machines), e.g. "pc"; `name` is then a server there. Same as giving the id as "pc/<id>".',
+  },
+};
 const serverList = { type: "array", items: { type: "string" }, description: 'Server names (in this project) or ids like "keel-review:dev".' };
 const profileRef = {
   type: "string",
@@ -68,16 +76,19 @@ const accountPicks = {
 };
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, ...(required.length ? { required } : {}) });
 
-const TOOLS = [
+export const TOOLS = [
   // ---------- servers ----------
   {
     name: "start_server",
     description:
       "Start a dev server in the background and wait until it is ready; returns its URL, or the error and last log lines if it fails. " +
       "Idempotent: if a server with this name is already running it is returned as-is. " +
-      "Without `command`, uses servedev.json or the package.json dev script. Also restarts a known, stopped server by name.",
+      "Without `command`, uses servedev.json or the package.json dev script. Also restarts a known, stopped server by name. " +
+      "With `machine`, it runs on that machine (defined and owned there, in `dir`, a folder there) and its URL is forwarded here.",
     inputSchema: obj({
       name: { type: "string", description: 'Server name, e.g. "web" or "api". Defaults to the only configured server, or "dev".' },
+      dir: { type: "string", description: "Folder to run it in (default: cwd). With machine: a folder on that machine, absolute or ~/... (needed to create a server there)." },
+      ...machineProp,
       command: { type: "string", description: 'Shell command, e.g. "npm run dev". May contain {port}.' },
       hostname: { type: "string", description: 'Custom hostname served by servedev\'s proxy, e.g. "keel.localhost" -> http://keel.localhost.' },
       install: { type: "boolean", description: "Run the package manager install (e.g. pnpm install) before starting. Use when dependencies are missing." },
@@ -101,13 +112,13 @@ const TOOLS = [
     name: "list_servers",
     description:
       "List dev servers with status, URL, pid and uptime, plus servers running outside servedev (started from a terminal or another tool), " +
-      "which explain why a port may already be taken.",
+      "which explain why a port may already be taken. Servers on other machines have ids like pc/demo:api and a machine field.",
     inputSchema: obj({ all: { type: "boolean", description: "Include servers from all projects (and other machines' servers, with a MACHINE column)." }, machine: { type: "string", description: 'Another machine this servedev relays (servedev remote ls), e.g. "pc": only its servers, ids like pc/demo:api.' }, ...cwdProp }),
   },
   {
     name: "server_status",
     description: "Details about one server (status, ports, command, exit code, process groups), its recent earlier runs with ids, and its latest log lines.",
-    inputSchema: obj({ name: serverRef, ...cwdProp }),
+    inputSchema: obj({ name: serverRef, ...machineProp, ...cwdProp }),
   },
   {
     name: "restart_server",
@@ -115,13 +126,14 @@ const TOOLS = [
     inputSchema: obj({
       name: serverRef,
       profile: { type: "string", description: 'Run with this profile\'s accounts; "none" for this machine\'s. Default: the ones it last ran with.' },
+      ...machineProp,
       ...cwdProp,
     }),
   },
   {
     name: "stop_server",
-    description: "Stop a server (its whole process tree). Pass all=true to stop every server in this project.",
-    inputSchema: obj({ name: serverRef, all: { type: "boolean" }, ...cwdProp }),
+    description: "Stop a server (its whole process tree). Pass all=true to stop every server in this project (with machine: everything running on that machine).",
+    inputSchema: obj({ name: serverRef, all: { type: "boolean" }, ...machineProp, ...cwdProp }),
   },
   {
     name: "save_server_config",
@@ -140,7 +152,7 @@ const TOOLS = [
   {
     name: "remove_server",
     description: "Stop a server and forget it: removes it from servedev (the dashboard's Forget), including its logs and run history.",
-    inputSchema: obj({ name: serverRef, ...cwdProp }, ["name"]),
+    inputSchema: obj({ name: serverRef, ...machineProp, ...cwdProp }, ["name"]),
   },
   {
     name: "remove_project",
@@ -169,8 +181,18 @@ const TOOLS = [
     name: "inspect_folder",
     description:
       "What servedev would do for a folder before starting a server there: project, detected dev command, dependency install state, " +
-      "servers defined in servedev.json, and a suggested name.",
-    inputSchema: obj({ path: { type: "string", description: "Folder (absolute, ~/..., or relative to cwd). Defaults to cwd." }, ...cwdProp }),
+      "servers defined in servedev.json, and a suggested name. With machine, a folder on that machine.",
+    inputSchema: obj({ path: { type: "string", description: "Folder (absolute, ~/..., or relative to cwd). Defaults to cwd. On a machine: absolute or ~/... there." }, ...machineProp, ...cwdProp }),
+  },
+  {
+    name: "list_folders",
+    description: "Subfolders of a folder, marking which hold package.json, servedev.json or a git repo; for finding a project folder, mainly on another machine. Names only, never file contents.",
+    inputSchema: obj({
+      path: { type: "string", description: "Folder (default: home on a machine, cwd here)." },
+      hidden: { type: "boolean", description: "Include dot-folders and node_modules." },
+      ...machineProp,
+      ...cwdProp,
+    }),
   },
   // ---------- logs ----------
   {
@@ -183,6 +205,7 @@ const TOOLS = [
       since: { type: "string", description: 'Only output from the last duration, e.g. "30s", "5m".' },
       previous_run: { type: "boolean", description: "Read the log of the previous run (useful after a crash + restart)." },
       run: { type: "number", description: "Read a specific earlier run by id (see server_runs)." },
+      ...machineProp,
       ...cwdProp,
     }),
   },
@@ -212,7 +235,20 @@ const TOOLS = [
   {
     name: "server_runs",
     description: "Run history of a server: each start with when it started, how it ended, how long it took to be ready, and whether its log is still kept.",
-    inputSchema: obj({ name: serverRef, limit: { type: "number", description: "How many runs (default 20)." }, ...cwdProp }),
+    inputSchema: obj({ name: serverRef, limit: { type: "number", description: "How many runs (default 20)." }, ...machineProp, ...cwdProp }),
+  },
+  // ---------- other machines ----------
+  {
+    name: "list_machines",
+    description:
+      "Other machines this servedev relays (each runs its own servedev, reached over SSH): connection state, system, servedev version, " +
+      "server counts and forwarded ports. Their servers have ids like pc/demo:api and open here at http://<server>.<machine>.localhost.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "reconnect_machine",
+    description: "Reconnect to a machine now (instead of waiting for the next retry), re-running the connection checklist; reports each step.",
+    inputSchema: obj({ machine: { type: "string" } }, ["machine"]),
   },
   // ---------- several servers ----------
   {
@@ -500,13 +536,28 @@ const TOOLS = [
 
 type Args = Record<string, any>;
 
-async function callTool(name: string, a: Args): Promise<OpResult> {
+/** A server reference with an optional machine: "api" + machine "pc" -> "pc/api". */
+export function machineRef(name: unknown, machine: unknown): string | undefined {
+  const n = typeof name === "string" && name ? name : undefined;
+  if (typeof machine !== "string" || !machine) return n;
+  if (!n) throw new Error(`pass the server's name on ${machine}`);
+  if (n.includes("/")) {
+    if (!n.startsWith(`${machine}/`)) throw new Error(`${n} isn't on ${machine}`);
+    return n;
+  }
+  return `${machine}/${n}`;
+}
+
+export async function callTool(name: string, a: Args): Promise<OpResult> {
   const cwd = a.cwd ? path.resolve(a.cwd) : process.cwd();
+  const ref = () => machineRef(a.name, a.machine);
   switch (name) {
     case "start_server":
       return opStart({
         cwd,
         name: a.name,
+        machine: a.machine || undefined,
+        folder: a.dir,
         command: a.command,
         setup: a.setup,
         install: a.install,
@@ -521,15 +572,16 @@ async function callTool(name: string, a: Args): Promise<OpResult> {
     case "list_servers":
       return opList({ cwd, all: a.all, machine: a.machine });
     case "server_status":
-      return opStatus({ cwd, name: a.name });
+      return opStatus({ cwd, name: ref() });
     case "restart_server":
-      return opRestart({ cwd, name: a.name, profile: a.profile });
+      return opRestart({ cwd, name: ref(), profile: a.profile });
     case "stop_server":
-      return opStop({ cwd, names: a.name ? [a.name] : [], all: a.all });
+      if (a.machine && a.all && !a.name) return opStop({ cwd, names: [], all: true, machine: a.machine });
+      return opStop({ cwd, names: a.name ? [ref()!] : [], all: a.all });
     case "save_server_config":
       return opSave({ cwd, name: a.name, force: a.force, dryRun: a.dry_run, includeSecrets: a.include_secrets });
     case "remove_server":
-      return opRemove({ cwd, name: a.name });
+      return opRemove({ cwd, name: ref()! });
     case "remove_project":
       return opRemoveProject({ cwd, project: a.project, path: a.path });
     case "pin_server":
@@ -537,13 +589,19 @@ async function callTool(name: string, a: Args): Promise<OpResult> {
     case "set_hostname":
       return opHostname({ cwd, name: a.name, hostname: a.hostname || undefined, clear: !a.hostname });
     case "inspect_folder":
-      return opInspect({ cwd, path: a.path });
+      return opInspect({ cwd, path: a.path, machine: a.machine || undefined });
+    case "list_folders":
+      return opDirs({ cwd, path: a.path, machine: a.machine || undefined, hidden: a.hidden });
+    case "list_machines":
+      return opRemoteList();
+    case "reconnect_machine":
+      return opRemoteReconnect(String(a.machine ?? ""));
     case "server_logs":
-      return opLogs({ cwd, name: a.name, tail: a.lines, grep: a.grep, since: a.since, prev: a.previous_run, run: a.run });
+      return opLogs({ cwd, name: ref(), tail: a.lines, grep: a.grep, since: a.since, prev: a.previous_run, run: a.run });
     case "search_logs":
       return opSearch({ cwd, query: a.query, preset: a.preset, servers: a.servers, machine: a.machine, all: a.all_projects, since: a.since, context: a.context, limit: a.limit, runs: a.runs });
     case "server_runs":
-      return opRuns({ cwd, name: a.name, limit: a.limit });
+      return opRuns({ cwd, name: ref(), limit: a.limit });
     case "start_servers":
       return opBulk({ cwd, action: "start", profile: a.profile, servers: a.servers, all: a.all });
     case "stop_servers":
@@ -661,7 +719,9 @@ export async function runMcp() {
               "start_server is idempotent and waits until the server is ready. After code changes, run search_logs with preset='errors' " +
               "and since='1m' to check for errors instead of restarting; dev servers usually hot-reload. " +
               "Everything the servedev dashboard can do has a tool here: profiles, custom grids (get_grid/set_grid), pins, custom hostnames, " +
-              "taking over servers started outside servedev, and settings.",
+              "taking over servers started outside servedev, and settings. " +
+              "Other machines (list_machines) run their own servedev: their servers have ids like pc/demo:api, server tools take `machine`, " +
+              "and start_server with machine + dir creates a server in a folder there (find one with list_folders / inspect_folder).",
           };
           break;
         case "ping":

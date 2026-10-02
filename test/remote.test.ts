@@ -7,6 +7,7 @@ import { ConfigStore, resolveConfig, resolveMachines } from "../src/config";
 import type { PublicServer } from "../src/manager";
 import { chooseLocalPort, diffForwards, wantedPorts, type PortProbe } from "../src/remote/forwards";
 import { RemoteHub, localUrl } from "../src/remote/hub";
+import { RemoteApi } from "../src/remote/api";
 import { assertMachineName, hostAliases, resolveRemoteRef, splitRef } from "../src/remote/ids";
 import { Machine } from "../src/remote/machine";
 import type { LongProc, RunResult, Spawner } from "../src/remote/process";
@@ -150,14 +151,18 @@ function fakeSsh(o: FakeOpts) {
 }
 
 /** A remote servedev API that insists on its own Host and token, like the real one. */
-function fakeRemote(token = "tok", servers: Partial<PublicServer>[] = [{ id: "demo:api", name: "api", project: "demo", status: "running", ports: [3000], url: "http://localhost:3000" }]) {
+function fakeRemote(
+  token = "tok",
+  servers: Partial<PublicServer>[] = [{ id: "demo:api", name: "api", project: "demo", status: "running", ports: [3000], url: "http://localhost:3000" }],
+  extra?: (req: Request, url: URL) => Response | undefined | Promise<Response | undefined>,
+) {
   const hosts: string[] = [];
   const streams: ReadableStreamDefaultController[] = [];
   const srv = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     idleTimeout: 0,
-    fetch(req) {
+    async fetch(req) {
       hosts.push(req.headers.get("host") ?? "");
       if (req.headers.get("host") !== "127.0.0.1:7777") return new Response("forbidden host", { status: 403 });
       const p = new URL(req.url).pathname;
@@ -173,12 +178,14 @@ function fakeRemote(token = "tok", servers: Partial<PublicServer>[] = [{ id: "de
         });
         return new Response(stream, { headers: { "content-type": "text/event-stream" } });
       }
-      return Response.json({ error: "not found" }, { status: 404 });
+      const handled = await extra?.(req, new URL(req.url));
+      if (handled) return handled;
+      return Response.json({ error: `not found: ${req.method} ${p}` }, { status: 404 });
     },
   });
   cleanups.push(() => srv.stop(true));
   const send = (event: string, data: unknown) => streams.forEach((c) => c.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)));
-  return { port: srv.port!, hosts, send };
+  return { port: srv.port!, hosts, send, servers };
 }
 
 function memorySecrets(): SecretStore & { data: Map<string, string> } {
@@ -537,4 +544,76 @@ test("detect: Windows lands in cmd.exe and is driven through WSL; others are pos
   const mac = fakeSsh({});
   expect(await detect(new SshLink({ target: "me@mac", socket: path.join(tmp(), "s"), spawner: mac.spawner }))).toEqual({ kind: "posix", os: "macOS" });
   expect(mac.calls.at(-1)!.at(-1)).toStartWith(`exec "$SHELL" -lc`);
+});
+
+// ---------- creating servers on a machine (stage 3) ----------
+
+/** A hub with one connected machine whose API is a fake remote with inspect/start/dirs. */
+function hubWithRemote(opts: { oldServedev?: boolean } = {}) {
+  const asked: { method: string; path: string; body?: any }[] = [];
+  const made: Partial<PublicServer> = { id: "code:web", name: "web", project: "code", root: "/home/pc/code", cwd: "/home/pc/code/app", status: "running", ports: [8000], url: "http://localhost:8000" };
+  const remote = fakeRemote("tok", [], async (req, url) => {
+    const body = req.method === "POST" ? await req.json() : undefined;
+    asked.push({ method: req.method, path: `${url.pathname}${url.search}`, body });
+    if (url.pathname === "/api/inspect") {
+      const dir = url.searchParams.get("dir")!.replace(/^~/, "/home/pc");
+      if (dir.includes("nope")) return Response.json({ dir, exists: false });
+      return Response.json({ dir, exists: true, root: "/home/pc/code", project: "code", detected: null, existing: [], configured: [], suggestedName: "app" });
+    }
+    if (url.pathname === "/api/start") return Response.json({ server: made, alreadyRunning: false, ready: { ok: true } });
+    if (url.pathname === "/api/dirs" && !opts.oldServedev) return Response.json({ path: "/home/pc", home: "/home/pc", dirs: [{ name: "code", path: "/home/pc/code", git: true }], hidden: 3 });
+    return undefined;
+  });
+  const hub = new RemoteHub({ dir: tmp(), secrets: memorySecrets(), hubVersion: "0.3.0", urlFor: (h) => `http://${h}:7780`, spawner: fakeSsh({ denied: true }).spawner });
+  cleanups.push(() => hub.dispose());
+  hub.sync({ pc: { ssh: "me@pc" } });
+  const m = hub.get("pc");
+  m.status = { state: "connected", attempt: 0 };
+  m.version = opts.oldServedev ? "0.2.0" : "0.3.0";
+  (m as unknown as { api: RemoteApi }).api = new RemoteApi(remote.port, 7777, "tok");
+  m.forwards.set(8000, { localPort: 41000, target: "127.0.0.1" });
+  return { hub, m, asked, remote };
+}
+
+test("hub: creating a server in a folder on a machine; the answer comes back with a pc/ id and the URL here", async () => {
+  const { hub, asked } = hubWithRemote();
+  const r = (await hub.start({ machine: "pc", name: "web", dir: "~/code/app", command: "python3 -m http.server {port}", port: "auto", root: "/Users/me/x", clientCwd: "/Users/me/x", env: { HOME: "/Users/me" } })) as any;
+  expect(asked.map((a) => `${a.method} ${a.path}`)).toEqual(["GET /api/inspect?dir=%7E%2Fcode%2Fapp", "POST /api/start"]);
+  expect(asked[1].body).toEqual({ name: "web", root: "/home/pc/code", clientCwd: "/home/pc/code/app", command: "python3 -m http.server {port}", port: "auto" });
+  expect(r.server).toMatchObject({ id: "pc/code:web", machine: "pc", remoteId: "code:web", url: "http://127.0.0.1:41000", remoteUrl: "http://localhost:8000", customUrl: "http://web.pc.localhost:7780" });
+  // The machine knows it right away (the sidebar can select it).
+  expect(hub.find("pc/web")?.server.id).toBe("code:web");
+  // Then it's a known server: a pc/ name starts it by id, no folder needed.
+  asked.length = 0;
+  await hub.start({ name: "pc/web", restart: true });
+  expect(asked).toEqual([{ method: "POST", path: "/api/start", body: { id: "code:web", clientCwd: "/home/pc/code/app", restart: true } }]);
+  // Local starts aren't the hub's.
+  expect(await hub.start({ name: "web", root: "/x" })).toBeUndefined();
+  await expect(hub.start({ machine: "pc", name: "web2", dir: "~/nope" })).rejects.toThrow("no folder at /home/pc/nope on pc");
+  await expect(hub.start({ machine: "box", name: "web" })).rejects.toThrow(/no machine called "box"/);
+});
+
+test("hub: inspecting a folder on a machine says where its server would open here", async () => {
+  const { hub } = hubWithRemote();
+  expect(await hub.inspect("pc", "~/code/app")).toMatchObject({ dir: "/home/pc/code/app", exists: true, project: "code", machine: "pc", urlTemplate: "http://{host}.pc.localhost:7780" });
+  await expect(hub.inspect("pc", "code/app")).rejects.toThrow(/absolute path/);
+});
+
+test("hub: folder listing on a machine, and a clear message when its servedev predates it", async () => {
+  const { hub, asked } = hubWithRemote();
+  expect(await hub.dirs("pc", { path: "~", hidden: null })).toMatchObject({ path: "/home/pc", machine: "pc", dirs: [{ name: "code" }] });
+  expect(asked[0].path).toBe("/api/dirs?path=%7E");
+  const old = hubWithRemote({ oldServedev: true });
+  await expect(old.hub.dirs("pc", { path: "~" })).rejects.toMatchObject({
+    status: 501,
+    message: "pc runs servedev 0.2.0, which can't list its folders (type the path instead); update it (this machine runs 0.3.0).",
+  });
+});
+
+test("hub: nothing goes to a machine that isn't connected", async () => {
+  const { hub, m, asked } = hubWithRemote();
+  m.status = { state: "offline", attempt: 6 };
+  await expect(hub.start({ machine: "pc", name: "web", dir: "~/code/app" })).rejects.toThrow(/offline/);
+  await expect(hub.dirs("pc", {})).rejects.toThrow(/offline/);
+  expect(asked).toEqual([]);
 });

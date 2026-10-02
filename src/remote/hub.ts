@@ -10,6 +10,7 @@ import type { Route } from "../proxy";
 import type { RemoteApi } from "./api";
 import { RefError, assertMachineName, remoteId, resolveRemoteRef, splitRef } from "./ids";
 import { Machine, type MachineDeps } from "./machine";
+import { assertRemotePath, isMissingEndpoint, remoteStartBody, tooOld } from "./create";
 import type { MachineConfig, MachineSummary, RemoteServerView, SetupStep } from "./types";
 
 export interface HubDeps extends Omit<MachineDeps, "reserved"> {
@@ -247,6 +248,53 @@ export class RemoteHub extends EventEmitter {
     };
     if (Array.isArray(out.results)) out.results = out.results.map((r: any) => (r && typeof r === "object" ? { ...r, id: prefix(r.id), ...("url" in r ? { url: here(r.url) } : {}) } : r));
     return out as T;
+  }
+
+  // ---------- new servers on a machine ----------
+
+  /**
+   * /api/start for another machine: a "pc/..." id or name, or `machine` with a name and/or the
+   * folder there (`dir`) to create a server in. Answers in hub terms; undefined for a local start.
+   */
+  async start(body: Record<string, any>): Promise<object | undefined> {
+    const ref = body.id ?? body.name;
+    const split = typeof ref === "string" ? splitRef(ref) : undefined;
+    const named = typeof body.machine === "string" && body.machine ? body.machine : undefined;
+    if (!split && !named) return undefined;
+    if (split && named && split.machine !== named) throw new RefError(400, `${ref} is on ${split.machine}, not ${named}`);
+    const m = this.get(split?.machine ?? named!);
+    const api = m.liveApi();
+    const startBody = await remoteStartBody(
+      { machine: m.name, servers: [...m.servers.values()], inspect: (dir) => api.call("GET", `/api/inspect?${new URLSearchParams({ dir })}`) },
+      { ...body, name: split ? split.ref : body.name },
+    );
+    // Long enough for an install before the server is ready (the remote applies its own timeout).
+    const waitSec = typeof body.timeout === "number" ? body.timeout : body.install || body.setup ? 300 : 60;
+    const data = await api.call<{ server?: PublicServer }>("POST", "/api/start", startBody, (waitSec + 60) * 1000);
+    // Answer with its URL here once its port is forwarded.
+    if (data?.server) await m.observe(data.server);
+    return this.rewrite(m, data);
+  }
+
+  /** A folder on a machine, as the "new server" dialog needs it, plus where a server there opens here. */
+  async inspect(machine: string, dir: string): Promise<Record<string, unknown>> {
+    const m = this.get(machine);
+    const path = assertRemotePath(m.name, dir);
+    const data = await m.liveApi().call<Record<string, unknown>>("GET", `/api/inspect?${new URLSearchParams({ dir: path })}`);
+    return { ...data, machine: m.name, urlTemplate: this.deps.urlFor(`{host}.${m.name}.localhost`) };
+  }
+
+  /** A machine's /api/dirs; an older servedev there gets a clear "update it" instead of a 404. */
+  async dirs(machine: string, params: { path?: string | null; hidden?: string | null; limit?: string | null }): Promise<Record<string, unknown>> {
+    const m = this.get(machine);
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined) q.set(k, v);
+    try {
+      return { ...(await m.liveApi().call<Record<string, unknown>>("GET", `/api/dirs?${q}`)), machine: m.name };
+    } catch (e) {
+      if (isMissingEndpoint(e)) throw tooOld(m.name, m.version, this.deps.hubVersion, "list its folders (type the path instead)");
+      throw e;
+    }
   }
 
   // ---------- hostname proxy ----------

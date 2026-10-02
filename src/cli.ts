@@ -40,6 +40,7 @@ import {
   opStop,
   opUp,
   opWait,
+  opDirs,
   type OpResult,
 } from "./ops";
 import { clean } from "./logs";
@@ -51,6 +52,7 @@ const HELP = `servedev ${VERSION} — manage local dev servers (built for coding
 
 Usage:
   servedev start [name] [-- <command...>]   start a server and wait until it's ready (idempotent)
+                [--dir <folder>]            ...in that folder instead of the current one
   servedev up [names...]                    start servers from servedev.json in dependency order
   servedev ls [--all]                       list servers (this project, or all)
   servedev status [name]                    details + recent logs
@@ -110,6 +112,10 @@ Other machines (this one is the hub; each machine runs its own servedev, reached
   servedev remote boot <name> [--install]   Windows/WSL: start servedev at logon and keep WSL running
   Their servers' ids start with the machine: pc/demo:api. Use them anywhere a server name goes, or add
   --on <machine> to start, stop, restart, logs, status, search and ls (e.g. servedev logs api --on pc).
+  servedev start <name> --on pc --dir '~/code/app' [-- <command>]
+                                            create (or start) a server in a folder on that machine; it's
+                                            defined there, and opens here at http://<name>.pc.localhost
+  servedev dirs [path] [--on pc] [--hidden] subfolders of a folder (there), marking projects
 
 Start options:
   --port <n|auto>       set $PORT (and {port} in the command); auto picks a free one
@@ -240,6 +246,8 @@ async function main() {
       apply: { type: "boolean" },
       map: { type: "string", multiple: true },
       on: { type: "string" },
+      dir: { type: "string", short: "d" },
+      hidden: { type: "boolean" },
     },
   });
 
@@ -272,7 +280,9 @@ async function main() {
       const env = o.env ? parseEnv(o.env) : undefined;
       result = await opStart({
         cwd,
-        name: on(args[0]),
+        name: args[0],
+        machine: o.on,
+        folder: o.dir,
         command,
         setup: o.setup,
         install: o.install,
@@ -329,6 +339,10 @@ async function main() {
       });
       break;
     }
+    case "dirs":
+    case "folders":
+      result = await opDirs({ cwd, path: args[0], machine: o.on, hidden: o.hidden });
+      break;
     case "remove-project":
       result = await opRemoveProject({ cwd, path: args[0] });
       break;
