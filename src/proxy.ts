@@ -10,7 +10,7 @@ import type { Server as BunServer, ServerWebSocket } from "bun";
 
 export type Route =
   | { status: "ok"; port: number; serverId: string }
-  | { status: "stopped"; serverId: string; hostname: string }
+  | { status: "stopped"; serverId: string; hostname: string; /** Why, when it isn't simply stopped (e.g. its machine is offline). */ reason?: string }
   | { status: "unknown"; hostnames: string[] };
 
 interface WsData {
@@ -32,8 +32,9 @@ export function hostOf(hostHeader: string): string {
   return hostHeader.replace(/:\d+$/, "").replace(/\.$/, "").toLowerCase();
 }
 
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+
 function page(status: number, title: string, body: string): Response {
-  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
   return new Response(
     `<!doctype html><meta charset="utf-8"><title>${esc(title)}</title>` +
       `<body style="font:15px/1.5 system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem"><h1 style="font-size:1.25rem">${esc(title)}</h1>${body}` +
@@ -109,7 +110,8 @@ export class HostProxy {
       return page(404, `No dev server is called ${host || "(no host)"}`, list ? `<p>Known hostnames:</p><ul>${list}</ul>` : "<p>No servers have a hostname yet.</p>");
     }
     if (r.status === "stopped") {
-      return page(502, `${r.hostname} is not running`, `<p>It belongs to <code>${r.serverId}</code>. Start it from the dashboard or with <code>servedev start</code>.</p>`);
+      const why = r.reason ? esc(r.reason) : `Start it from the dashboard or with <code>servedev start</code>.`;
+      return page(502, `${r.hostname} is not running`, `<p>It belongs to <code>${esc(r.serverId)}</code>. ${why}</p>`);
     }
 
     const url = new URL(req.url);

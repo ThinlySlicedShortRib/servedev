@@ -5,7 +5,7 @@ import { PRESETS, fileSize, lineAtOffset, parseDuration, queryLines, readFrom, s
 import { ACTIVE, Manager, publicView, type PublicServer, type ReadyResult, type Server } from "./manager";
 import { listeners, processTable, type Proc } from "./ports";
 import { HostProxy, type Route } from "./proxy";
-import { DAEMON_PORT, DB_FILE, LOCAL_CONFIG, VERSION, getToken } from "./paths";
+import { DAEMON_PORT, DB_FILE, LOCAL_CONFIG, MACHINES_DIR, VERSION, getToken } from "./paths";
 import { autostartStatus, installAutostart, uninstallAutostart } from "./autostart";
 import { gitBranch } from "./git";
 import { cwdsOf, detectExternal, launcherOf, startTimesOf, suggestName, type ExternalServer } from "./external";
@@ -37,6 +37,12 @@ import { planInstall, type InstallPlan } from "./install";
 import { detectCommand, findRoot, loadConfig, type GridTile, type ReadySpec, type ServerConfig } from "./project";
 import type { Run } from "./store";
 import uiBundle from "../ui/dist/index.html" with { type: "text" };
+import { RemoteHub } from "./remote/hub";
+import { defaultSecretStore } from "./remote/secrets";
+import { assertMachineName } from "./remote/ids";
+import { BOOT_TASK, bootTaskPowerShell, encodedPowerShell, writeBootScript } from "./remote/boot";
+import { readSse } from "./remote/sse";
+import type { MachineSummary, RemoteServerView, SetupStep } from "./remote/types";
 
 // The dashboard (ui/) builds to a single self-contained HTML file, embedded here as text.
 const uiHtml = uiBundle as unknown as string;
@@ -144,6 +150,12 @@ class HttpError extends Error {
   }
 }
 
+/** HTTP status for an error: ours, or one relayed from a remote machine (which carries its own). */
+function statusOf(e: unknown): number {
+  const status = (e as { status?: unknown })?.status;
+  return typeof status === "number" && status >= 400 && status < 600 ? status : 500;
+}
+
 export interface ProcessGroup {
   pgid: number;
   /** "servedev" for the group servedev created, else the program that created it, e.g. "turbo". */
@@ -211,6 +223,28 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   manager.retentionDays = () => config.setting("log_retention_days");
   manager.sync(resolved.servers.values());
 
+  // Other machines' servers, relayed through their own servedev (see src/remote).
+  const hub = new RemoteHub({
+    dir: MACHINES_DIR,
+    secrets: defaultSecretStore(MACHINES_DIR),
+    hubVersion: VERSION,
+    urlFor: (hostname) => proxy.urlFor(hostname),
+  });
+  // Facts found while connecting (WSL or not, which distro) are kept in config.json for next time.
+  hub.on("detected", (name: string, facts: { kind?: string; distro?: string }) => {
+    if (!config.local.machines?.[name]) return;
+    configCall(() =>
+      config.editLocal((c) => {
+        const m = c.machines?.[name];
+        if (!m) return;
+        if (facts.kind) m.kind = facts.kind as "posix" | "wsl";
+        if (facts.distro) m.distro = facts.distro;
+      }),
+    );
+  });
+  // A remote server's forwarded port can need the hostname proxy.
+  hub.on("machine", () => syncProxy());
+
   /**
    * Once: servers, profiles, grids, pins and settings move from the database into config.json.
    * The database is copied first (servedev.db.pre-config) so nothing can be lost.
@@ -262,6 +296,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     if (JSON.stringify(resolved.profiles) + JSON.stringify([...resolved.grids]) !== before) profilesChanged();
     if (JSON.stringify(resolved.issues) !== issuesBefore) manager.emit("config", configSummary());
+    hub.sync(resolved.machines);
     syncProxy();
   }
   config.on("change", () => reconcile());
@@ -313,9 +348,12 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   }
 
   // Custom hostnames (keel.localhost) -> each server's current port.
+  // Remote machines' servers get <server>.<machine>.localhost, routed to their forwarded port.
   const proxy = new HostProxy((host): Route => {
     const s = manager.list().find((x) => x.hostname === host);
-    if (!s) return { status: "unknown", hostnames: manager.list().flatMap((x) => (x.hostname ? [x.hostname] : [])).sort() };
+    const remote = s ? undefined : hub.route(host);
+    if (remote) return remote;
+    if (!s) return { status: "unknown", hostnames: [...manager.list().flatMap((x) => (x.hostname ? [x.hostname] : [])), ...hub.routes().map((r) => r.hostname)].sort() };
     const port = s.url ? Number(new URL(s.url).port) : s.ports[0];
     if (!ACTIVE.includes(s.status) || !port) return { status: "stopped", serverId: s.id, hostname: host };
     return { status: "ok", port, serverId: s.id };
@@ -323,7 +361,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
 
   /** Run the proxy only while some server has a hostname. */
   function syncProxy(restart = false) {
-    const wanted = manager.list().some((s) => s.hostname);
+    // Remote servers' hostnames keep it up even while their machine reconnects (they answer "not running").
+    const wanted = manager.list().some((s) => s.hostname) || hub.hostnames().length > 0;
+    const was = proxy.running;
     if (restart || !wanted) proxy.stop();
     if (wanted && !proxy.running) {
       proxy.start(config.setting("proxy_port"));
@@ -331,6 +371,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       // Every hostname's URL depends on the proxy port.
       for (const s of manager.list()) if (s.hostname) manager.emit("change", s);
     }
+    if (was !== proxy.running || restart) hub.emitAll();
   }
 
   function proxyStatus() {
@@ -416,6 +457,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   function accountsChanged() {
     manager.emit("accounts", {});
   }
+  hub.sync(resolved.machines);
   syncProxy();
   manager.startMonitor();
 
@@ -915,7 +957,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   async function scanExternal(): Promise<ExternalServer[]> {
     const [ls, table] = await Promise.all([listeners(), processTable()]);
     const groups = new Set(manager.list().filter((s) => ACTIVE.includes(s.status)).flatMap((s) => (s.pgids?.length ? s.pgids : s.pid ? [s.pid] : [])));
-    const managed = new Set(table.filter((p) => groups.has(p.pgid)).map((p) => p.pid));
+    // The daemon's own children count as managed too: ssh masters listen on remote machines' forwards.
+    const managed = new Set(table.filter((p) => groups.has(p.pgid) || p.ppid === process.pid).map((p) => p.pid));
     const byPid = new Map(table.map((p) => [p.pid, p]));
     const launchers = new Set<number>();
     const lookup = new Set<number>();
@@ -1490,12 +1533,134 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
   }
 
+  // ---------- other machines ----------
+
+  /** Requests about one server that take its id or name: relayed when it's on another machine. */
+  const SERVER_POSTS = new Set(["/api/start", "/api/stop", "/api/restart", "/api/remove", "/api/pin", "/api/hostname", "/api/wait", "/api/config"]);
+  const SERVER_GETS = new Set(["/api/logs", "/api/processes", "/api/runs", "/api/config"]);
+
+  /**
+   * Hand a request about a "pc/..." server to that machine's servedev, with the id it has there,
+   * and bring the answer back in hub terms. Undefined: not a remote server, handle it here.
+   */
+  async function relay(req: Request, p: string, q: URLSearchParams, body: Record<string, any>): Promise<object | Response | undefined> {
+    if (req.method === "POST" && SERVER_POSTS.has(p)) {
+      const t = hub.target(body.id ?? body.name);
+      if (!t) return undefined;
+      if (p === "/api/start" && (body.command || body.setup !== undefined || body.install || body.cwd)) {
+        throw new HttpError(400, `defining a server on ${t.machine.name} from here isn't supported yet; set it up there, then start it as ${t.machine.name}/${t.server.id}`);
+      }
+      // root and the client's folder are this machine's paths; the remote knows the server by id.
+      const { root: _root, name: _name, clientCwd: _cwd, id: _id, ...rest } = body;
+      const data = await t.api.call("POST", p, { ...rest, id: t.server.id });
+      // Started or restarted: answer with its local URL, once the port is forwarded.
+      if (["/api/start", "/api/restart", "/api/wait"].includes(p)) await t.machine.observe(data?.server);
+      return hub.rewrite(t.machine, data);
+    }
+    if (req.method === "GET" && (SERVER_GETS.has(p) || p === "/api/stream/logs")) {
+      const t = hub.target(q.get("id") ?? q.get("name"));
+      if (!t) return undefined;
+      const params = new URLSearchParams(q);
+      for (const k of ["root", "name", "token"]) params.delete(k);
+      params.set("id", t.server.id);
+      if (p === "/api/stream/logs") {
+        // Passed through as is: the single-server stream's events carry no ids.
+        const upstream = await t.api.stream(`${p}?${params}`, req.signal);
+        return new Response(upstream.body, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } });
+      }
+      return hub.rewrite(t.machine, await t.api.call("GET", `${p}?${params}`));
+    }
+    return undefined;
+  }
+
+  /** The "Add machine" checklist; on success the machine is saved in config.json and stays connected. */
+  async function addMachine(body: Record<string, any>): Promise<{ ok: boolean; steps: SetupStep[]; machine?: MachineSummary }> {
+    const name = String(body.name ?? "").trim();
+    const ssh = String(body.ssh ?? "").trim();
+    try {
+      assertMachineName(name);
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+    if (!ssh || /\s/.test(ssh)) throw new HttpError(400, "ssh is the destination to connect to, e.g. me@100.64.0.2 or a Host from ~/.ssh/config");
+    const r = await hub.add(name, { ssh });
+    if (!r.ok || !r.machine) return { ok: false, steps: r.steps };
+    const { kind, distro } = r.machine.config;
+    configCall(() =>
+      config.editLocal((c) => {
+        c.machines ??= {};
+        c.machines[name] = { ssh, ...(kind ? { kind } : {}), ...(distro ? { distro } : {}) };
+      }),
+    );
+    reconcile();
+    return { ok: true, steps: r.steps, machine: hub.summary(r.machine) };
+  }
+
+  /** Start servedev when the PC boots into WSL: writes the script there, gives (or runs) the task command. */
+  async function bootTask(name: string, install: boolean) {
+    const m = hub.get(name);
+    if (m.config.kind !== "wsl") {
+      return {
+        name,
+        supported: false,
+        note: `${name} isn't a Windows/WSL machine. On macOS, pin a server there (servedev pin <name>) and servedev installs its login item; elsewhere start servedev from your init system.`,
+      };
+    }
+    const transport = m.liveTransport();
+    const r = await transport.run(writeBootScript(), { timeoutMs: 30_000 });
+    const script = /^@file (.+)$/m.exec(r.stdout)?.[1]?.trim();
+    if (r.code !== 0 || !script) throw new HttpError(502, `couldn't write the boot script on ${name}: ${r.stderr.trim() || `exit ${r.code}`}`);
+    const powershell = bootTaskPowerShell(m.config.distro, script);
+    let installed = false;
+    let output: string | undefined;
+    if (install) {
+      // Raw cmd.exe command (not through WSL): the task is a Windows one.
+      const res = await m.runWindows(encodedPowerShell(powershell));
+      installed = res.code === 0;
+      output = (res.stderr || res.stdout).trim() || undefined;
+    }
+    return { name, supported: true, task: BOOT_TASK, script, powershell, installed, output };
+  }
+
+  /** Log search here and, for remote servers (or `all`), on their machines; results merged. */
+  async function searchEverywhere(req: SearchRequest): Promise<SearchResponse> {
+    const { local, remote } = hub.partition(req.servers ?? []);
+    const machines = new Map(remote);
+    if (req.all && !req.servers?.length) for (const m of hub.machines.values()) if (m.connected) machines.set(m, []);
+    const searchHere = !req.servers?.length || local.length > 0;
+    const mine = searchHere ? search({ ...req, servers: req.servers?.length ? local.map(String) : undefined }) : undefined;
+    const theirs = await Promise.all(
+      [...machines].map(async ([m, ids]) =>
+        hub.rewrite(m, await m.liveApi().call<SearchResponse>("POST", "/api/search", { ...req, root: undefined, servers: ids.length ? ids : undefined, all: ids.length ? undefined : true })),
+      ),
+    );
+    const all = [...(mine ? [mine] : []), ...theirs];
+    return { pattern: all[0]?.pattern ?? "", searched: all.reduce((n, r) => n + r.searched, 0), results: all.flatMap((r) => r.results) };
+  }
+
   async function handle(req: Request, url: URL): Promise<Response | object> {
     const p = url.pathname;
     const q = url.searchParams;
     const body = req.method === "POST" ? ((await req.json().catch(() => ({}))) as Record<string, any>) : {};
 
     if (p === "/api/health") return { ok: true, version: VERSION, pid: process.pid };
+    const relayed = await relay(req, p, q, body);
+    if (relayed !== undefined) return relayed;
+    if (p === "/api/machines" && req.method === "GET") return { machines: hub.summaries(), hubVersion: VERSION };
+    if (p === "/api/machines/add" && req.method === "POST") return addMachine(body);
+    if (p === "/api/machines/remove" && req.method === "POST") {
+      const name = String(body.name ?? "");
+      hub.remove(name);
+      configCall(() => config.editLocal((c) => void delete c.machines?.[name]));
+      reconcile();
+      return { removed: name };
+    }
+    if (p === "/api/machines/reconnect" && req.method === "POST") {
+      const m = hub.get(String(body.name ?? ""));
+      const steps = await m.reconnect();
+      return { ok: m.connected, steps, machine: hub.summary(m) };
+    }
+    if (p === "/api/machines/boot" && req.method === "POST") return bootTask(String(body.name ?? ""), !!body.install);
     if (p === "/api/pin" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
       const on = body.pinned !== false;
@@ -1526,7 +1691,15 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         note: resolvesLocally ? undefined : `${hostname} doesn't point at this Mac by itself; add "127.0.0.1 ${hostname}" to /etc/hosts, or use a .localhost name.`,
       };
     }
-    if (p === "/api/proxy") return { ...proxyStatus(), hostnames: manager.list().flatMap((s) => (s.hostname ? [{ hostname: s.hostname, id: s.id, url: proxy.urlFor(s.hostname) }] : [])) };
+    if (p === "/api/proxy") {
+      return {
+        ...proxyStatus(),
+        hostnames: [
+          ...manager.list().flatMap((s) => (s.hostname ? [{ hostname: s.hostname, id: s.id, url: proxy.urlFor(s.hostname) }] : [])),
+          ...hub.routes().map((r) => ({ ...r, url: proxy.urlFor(r.hostname) })),
+        ],
+      };
+    }
     if (p === "/api/autostart") {
       if (req.method === "POST") return body.enabled === false ? uninstallAutostart() : installAutostart(selfCommand());
       return autostartStatus();
@@ -1618,17 +1791,28 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     if (p === "/api/profiles/duplicate" && req.method === "POST") return { profile: duplicateProfile(profileRef(body.id ?? body.profile), body) };
     // Bulk actions for the dashboard: the servers of whatever it's showing (all, a profile, a grid).
     if (p === "/api/servers/start" && req.method === "POST") {
-      const ids = serverIds(undefined, body.ids);
+      const { local, remote } = hub.partition(Array.isArray(body.ids) ? body.ids : []);
+      const ids = serverIds(undefined, local);
+      // Each machine starts its own servers in order; machines don't wait for each other.
+      const elsewhere = [...remote].map(async ([m, remoteIds]) =>
+        hub.rewrite(m, await m.liveApi().call<{ starting?: string[]; results?: ProfileStartResult[] }>("POST", p, { ids: remoteIds, wait: body.wait, timeout: body.timeout })),
+      );
       if (body.wait === false) {
         void startSequence(ids, body.timeout, body.profile);
-        return { starting: ids };
+        const more = await Promise.all(elsewhere);
+        return { starting: [...ids, ...more.flatMap((r) => r.starting ?? [])] };
       }
-      return { results: await startSequence(ids, body.timeout, body.profile) };
+      const [mine, more] = await Promise.all([startSequence(ids, body.timeout, body.profile), Promise.all(elsewhere)]);
+      return { results: [...mine, ...more.flatMap((r) => r.results ?? [])] };
     }
     if (p === "/api/servers/stop" && req.method === "POST") {
-      const ids = serverIds(undefined, body.ids);
-      await Promise.all(ids.map((id) => manager.stop(id)));
-      return { stopped: ids };
+      const { local, remote } = hub.partition(Array.isArray(body.ids) ? body.ids : []);
+      const ids = serverIds(undefined, local);
+      const [, more] = await Promise.all([
+        Promise.all(ids.map((id) => manager.stop(id))),
+        Promise.all([...remote].map(async ([m, remoteIds]) => hub.rewrite(m, await m.liveApi().call<{ stopped: string[] }>("POST", p, { ids: remoteIds })))),
+      ]);
+      return { stopped: [...ids, ...more.flatMap((r) => r.stopped)] };
     }
     if (p === "/api/profiles/start" && req.method === "POST") {
       const profile = profileRef(body.id ?? body.profile);
@@ -1638,7 +1822,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       }
       return { profile, results: await startProfile(profile, body.timeout) };
     }
-    if (p === "/api/search" && req.method === "POST") return search(body as SearchRequest);
+    if (p === "/api/search" && req.method === "POST") return searchEverywhere(body as SearchRequest);
     if (p === "/api/frame-check") {
       // Follow redirects by hand (login pages are where anti-framing headers usually live).
       let url = q.get("url") ?? "";
@@ -1726,7 +1910,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     if (p === "/api/inspect") return inspectDir(q.get("dir") ?? "");
     if (p === "/api/pick-folder" && req.method === "POST") return { path: await pickFolder(body.start) };
-    if (p === "/api/servers") return { servers: manager.list().map(view), configured: configured() };
+    if (p === "/api/servers") return { servers: [...manager.list().map(view), ...hub.views()], configured: configured(), machines: hub.summaries() };
     if (p === "/api/start" && req.method === "POST") return start(body as StartRequest);
     if (p === "/api/stop" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
@@ -1829,7 +2013,23 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     if (p === "/api/stream/events") {
       return sse(req, (send) => {
-        send("snapshot", { build: UI_BUILD, servers: manager.list().map(view), configured: configured(), profiles: profiles(), config: configSummary() });
+        send("snapshot", {
+          build: UI_BUILD,
+          servers: [...manager.list().map(view), ...hub.views()],
+          configured: configured(),
+          profiles: profiles(),
+          config: configSummary(),
+          machines: hub.summaries(),
+        });
+        // Other machines' servers arrive as ordinary server/remove events (with "pc/" ids).
+        const onRemoteServer = (v: RemoteServerView) => send("server", v);
+        const onRemoteRemove = (r: { id: string }) => send("remove", r);
+        const onMachine = (m: MachineSummary) => send("machine", m);
+        const onMachineRemoved = (r: { name: string }) => send("machine-removed", r);
+        hub.on("server", onRemoteServer);
+        hub.on("remove", onRemoteRemove);
+        hub.on("machine", onMachine);
+        hub.on("machine-removed", onMachineRemoved);
         const onProfiles = (list: ProfileView[]) => send("profiles", list);
         manager.on("profiles", onProfiles);
         const onConfig = (summary: unknown) => send("config", summary);
@@ -1849,6 +2049,10 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
           manager.off("config", onConfig);
           manager.off("layout", onLayout);
           manager.off("accounts", onAccounts);
+          hub.off("server", onRemoteServer);
+          hub.off("remove", onRemoteRemove);
+          hub.off("machine", onMachine);
+          hub.off("machine-removed", onMachineRemoved);
         };
       });
     }
@@ -1864,15 +2068,34 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     // Several servers' logs over one connection: browsers allow only ~6 connections per host,
     // so a grid of tiles can't each hold its own stream.
     if (p === "/api/stream/logs-multi") {
-      const ids = (q.get("ids") ?? "").split(",").filter(Boolean).map((ref) => resolveRef(undefined, ref, false).id);
+      const { local, remote } = hub.partition((q.get("ids") ?? "").split(",").filter(Boolean));
+      const ids = local.map((ref) => resolveRef(undefined, String(ref), false).id);
+      const backlog = Number(q.get("backlog") ?? 24 * 1024);
+      // A machine's servers come over one upstream stream of its own, ids prefixed on the way through.
+      const upstream = [...remote].map(([m, remoteIds]) => ({ m, api: m.liveApi(), remoteIds }));
       return sse(req, (send) => {
-        const polls = ids.map((id) =>
-          followLog(id, Number(q.get("backlog") ?? 24 * 1024), () => send("reset", { id }), (text) => send("data", { id, text })),
-        );
+        const polls = ids.map((id) => followLog(id, backlog, () => send("reset", { id }), (text) => send("data", { id, text })));
         const tick = () => polls.forEach((poll) => poll());
         tick();
         const timer = setInterval(tick, 300);
-        return () => clearInterval(timer);
+        const abort = new AbortController();
+        for (const { m, api, remoteIds } of upstream) {
+          const params = new URLSearchParams({ ids: remoteIds.join(","), backlog: String(backlog) });
+          void api
+            .stream(`/api/stream/logs-multi?${params}`, abort.signal)
+            .then((res) =>
+              readSse(res, (e) => {
+                if (e.event !== "reset" && e.event !== "data") return;
+                const d = JSON.parse(e.data);
+                send(e.event, { ...d, id: `${m.name}/${d.id}` });
+              }),
+            )
+            .catch(() => {});
+        }
+        return () => {
+          clearInterval(timer);
+          abort.abort();
+        };
       });
     }
     if (p === "/api/layouts" && req.method === "GET") return gridInfo(q.get("scope") ?? "draft");
@@ -1893,6 +2116,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     if (p === "/api/shutdown" && req.method === "POST") {
       setTimeout(() => {
         manager.saveNow();
+        hub.dispose();
         process.exit(0);
       }, 50);
       return { ok: true };
@@ -1929,7 +2153,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         const result = await handle(req, url);
         return result instanceof Response ? result : Response.json(result);
       } catch (e) {
-        const status = e instanceof HttpError ? e.status : 500;
+        const status = statusOf(e);
         return Response.json({ error: (e as Error).message }, { status });
       }
     },
@@ -1937,6 +2161,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
 
   const shutdown = () => {
     manager.saveNow();
+    hub.dispose();
     process.exit(0);
   };
   process.on("SIGTERM", shutdown);
