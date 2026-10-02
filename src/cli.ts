@@ -109,7 +109,7 @@ Other machines (this one is the hub; each machine runs its own servedev, reached
   servedev remote reconnect <name>          reconnect now, re-reading its token
   servedev remote boot <name> [--install]   Windows/WSL: start servedev at logon and keep WSL running
   Their servers' ids start with the machine: pc/demo:api. Use them anywhere a server name goes, or add
-  --on <machine> to start, stop, restart, logs, status and ls (e.g. servedev logs api --on pc).
+  --on <machine> to start, stop, restart, logs, status, search and ls (e.g. servedev logs api --on pc).
 
 Start options:
   --port <n|auto>       set $PORT (and {port} in the command); auto picks a free one
@@ -320,6 +320,7 @@ async function main() {
         query: args[0],
         preset: o.errors ? "errors" : o.warnings ? "warnings" : undefined,
         servers: o.server,
+        machine: o.on,
         all: o.all,
         since: o.since,
         context: o.context ? Number(o.context) : undefined,

@@ -102,7 +102,7 @@ const TOOLS = [
     description:
       "List dev servers with status, URL, pid and uptime, plus servers running outside servedev (started from a terminal or another tool), " +
       "which explain why a port may already be taken.",
-    inputSchema: obj({ all: { type: "boolean", description: "Include servers from all projects." }, ...cwdProp }),
+    inputSchema: obj({ all: { type: "boolean", description: "Include servers from all projects (and other machines' servers, with a MACHINE column)." }, machine: { type: "string", description: 'Another machine this servedev relays (servedev remote ls), e.g. "pc": only its servers, ids like pc/demo:api.' }, ...cwdProp }),
   },
   {
     name: "server_status",
@@ -197,6 +197,7 @@ const TOOLS = [
       preset: { type: "string", enum: ["errors", "warnings"], description: "Built-in pattern for errors (exceptions, ERR_* codes, missing modules, tracebacks, non-zero exits) or warnings." },
       servers: { ...serverList, description: "Servers to search. Default: all servers in the project." },
       all_projects: { type: "boolean", description: "Search servers in every project." },
+      machine: { type: "string", description: 'Another machine this servedev relays (servedev remote ls), e.g. "pc": only its servers, ids like pc/demo:api.' },
       since: { type: "string", description: 'Only output from the last duration, e.g. "2m" (current run only).' },
       context: { type: "number", description: "Lines of context around each match (default 2). Raise it for long stack traces." },
       limit: { type: "number", description: "Max matches per server log, keeping the most recent (default 20)." },
@@ -518,7 +519,7 @@ async function callTool(name: string, a: Args): Promise<OpResult> {
         env: a.env,
       });
     case "list_servers":
-      return opList({ cwd, all: a.all });
+      return opList({ cwd, all: a.all, machine: a.machine });
     case "server_status":
       return opStatus({ cwd, name: a.name });
     case "restart_server":
@@ -540,7 +541,7 @@ async function callTool(name: string, a: Args): Promise<OpResult> {
     case "server_logs":
       return opLogs({ cwd, name: a.name, tail: a.lines, grep: a.grep, since: a.since, prev: a.previous_run, run: a.run });
     case "search_logs":
-      return opSearch({ cwd, query: a.query, preset: a.preset, servers: a.servers, all: a.all_projects, since: a.since, context: a.context, limit: a.limit, runs: a.runs });
+      return opSearch({ cwd, query: a.query, preset: a.preset, servers: a.servers, machine: a.machine, all: a.all_projects, since: a.since, context: a.context, limit: a.limit, runs: a.runs });
     case "server_runs":
       return opRuns({ cwd, name: a.name, limit: a.limit });
     case "start_servers":

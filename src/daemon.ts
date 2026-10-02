@@ -90,6 +90,8 @@ export interface SearchRequest {
   all?: boolean;
   /** Server names or ids; default: every server in scope. */
   servers?: string[];
+  /** Every server on this other machine (a hub's "machines"), instead of local ones. */
+  machine?: string;
   query?: string;
   preset?: Preset;
   context?: number;
@@ -1626,13 +1628,17 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   async function searchEverywhere(req: SearchRequest): Promise<SearchResponse> {
     const { local, remote } = hub.partition(req.servers ?? []);
     const machines = new Map(remote);
-    if (req.all && !req.servers?.length) for (const m of hub.machines.values()) if (m.connected) machines.set(m, []);
+    if (req.machine && !req.servers?.length) {
+      const m = hub.get(req.machine);
+      m.liveApi();
+      machines.set(m, []);
+    } else if (req.all && !req.servers?.length) for (const m of hub.machines.values()) if (m.connected) machines.set(m, []);
     // `all` on a hub with no servers of its own searches just the machines.
-    const searchHere = req.servers?.length ? local.length > 0 : !(req.all && machines.size && !manager.list().length);
+    const searchHere = req.machine && !req.servers?.length ? false : req.servers?.length ? local.length > 0 : !(req.all && machines.size && !manager.list().length);
     const mine = searchHere ? search({ ...req, servers: req.servers?.length ? local.map(String) : undefined }) : undefined;
     const theirs = await Promise.all(
       [...machines].map(async ([m, ids]) =>
-        hub.rewrite(m, await m.liveApi().call<SearchResponse>("POST", "/api/search", { ...req, root: undefined, servers: ids.length ? ids : undefined, all: ids.length ? undefined : true })),
+        hub.rewrite(m, await m.liveApi().call<SearchResponse>("POST", "/api/search", { ...req, root: undefined, machine: undefined, servers: ids.length ? ids : undefined, all: ids.length ? undefined : true })),
       ),
     );
     const all = [...(mine ? [mine] : []), ...theirs];

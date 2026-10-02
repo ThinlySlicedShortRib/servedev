@@ -391,6 +391,8 @@ export interface SearchArgs {
   query?: string;
   preset?: Preset;
   servers?: string[];
+  /** Search this other machine's servers (servers named with --server are taken as being there). */
+  machine?: string;
   all?: boolean;
   since?: string;
   context?: number;
@@ -403,7 +405,8 @@ export async function opSearch(a: SearchArgs): Promise<OpResult> {
   const r = await api<SearchResponse>("/api/search", {
     root: findRoot(a.cwd),
     all: a.all,
-    servers: a.servers,
+    servers: a.machine ? a.servers?.map((n) => (n.includes("/") ? n : `${a.machine}/${n}`)) : a.servers,
+    machine: a.machine,
     query: a.query,
     preset: a.preset,
     since: a.since,
