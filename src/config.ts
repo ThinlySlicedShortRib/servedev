@@ -8,6 +8,8 @@ import { gitBranch, gitDir, gitInfo, repoIdentity } from "./git";
 import { applyChanges, deepEqual, hashText, parseJsonc, writeAtomic, type ParseIssue } from "./jsonc";
 import { CONFIG_FILE, normalizeReady, type GridTile, type ProjectConfig, type ReadySpec, type ServerConfig, type SharedProfileConfig } from "./project";
 import { maskSecrets } from "./sanitize";
+import { MACHINE_NAME } from "./remote/ids";
+import type { MachineConfig } from "./remote/types";
 
 /**
  * Configuration lives in JSON files; SQLite only keeps what happens (runs, logs, pids).
@@ -79,6 +81,8 @@ export interface LocalConfig {
   pinned?: string[];
   /** The unsaved custom grid (tiles by server id). */
   grid?: GridTile[];
+  /** Other machines whose servers this one shows and controls, over SSH (servedev remote add). */
+  machines?: Record<string, MachineConfig>;
 }
 
 export interface ConfigIssue {
@@ -142,7 +146,7 @@ function pruneLocal(c: LocalConfig) {
     }
     if (!Object.keys(profiles).length) delete c.overrides![repo];
   }
-  for (const key of ["servers", "overrides", "profiles", "projects", "settings"] as const) {
+  for (const key of ["servers", "overrides", "profiles", "projects", "settings", "machines"] as const) {
     if (isObject(c[key]) && !Object.keys(c[key]!).length) delete c[key];
   }
   if (c.pinned && !c.pinned.length) delete c.pinned;
@@ -487,6 +491,8 @@ export interface Resolved {
   profiles: ProfileView[];
   /** Grid tiles by scope ("draft", "profile:<id>"), tiles by server id. */
   grids: Map<string, GridTile[]>;
+  /** Remote machines by name (valid entries only). */
+  machines: Record<string, MachineConfig>;
   issues: ConfigIssue[];
 }
 
@@ -707,5 +713,36 @@ export function resolveConfig(store: ConfigStore): Resolved {
   }
   profiles.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "local" ? -1 : 1) || a.name.localeCompare(b.name) || (a.project ?? "").localeCompare(b.project ?? ""));
 
-  return { projects, servers, profiles, grids, issues };
+  return { projects, servers, profiles, grids, machines: resolveMachines(local.machines, (m) => warn(store.localFile, m)), issues };
+}
+
+/** config.json's machines, skipping (and reporting) entries that can't be used. */
+export function resolveMachines(raw: unknown, warn: (message: string) => void): Record<string, MachineConfig> {
+  const out: Record<string, MachineConfig> = {};
+  if (raw === undefined) return out;
+  if (!isObject(raw)) {
+    warn(`"machines" should be an object: { "<name>": { "ssh": "user@host" } }`);
+    return out;
+  }
+  for (const [name, m] of Object.entries(raw)) {
+    if (!MACHINE_NAME.test(name)) {
+      warn(`machine "${name}": names are lowercase letters, digits and dashes (they become part of ids like ${name}/web:api)`);
+      continue;
+    }
+    if (!isObject(m) || typeof m.ssh !== "string" || !m.ssh.trim()) {
+      warn(`machine "${name}" needs "ssh": the ssh destination, e.g. "me@100.64.0.2"`);
+      continue;
+    }
+    if (m.kind !== undefined && m.kind !== "posix" && m.kind !== "wsl") warn(`machine "${name}": kind is "posix" or "wsl" (detected when it connects; you can leave it out)`);
+    if (m.distro !== undefined && (typeof m.distro !== "string" || !/^[\w.-]+$/.test(m.distro))) {
+      warn(`machine "${name}": distro should be a WSL distro name like "Ubuntu"`);
+      continue;
+    }
+    out[name] = {
+      ssh: m.ssh.trim(),
+      ...(m.kind === "posix" || m.kind === "wsl" ? { kind: m.kind } : {}),
+      ...(typeof m.distro === "string" ? { distro: m.distro } : {}),
+    };
+  }
+  return out;
 }

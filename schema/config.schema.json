@@ -423,6 +423,39 @@
         }
       },
       "description": "The unsaved custom grid (tiles by server id)."
+    },
+    "machines": {
+      "type": "object",
+      "description": "Other machines whose servers this servedev shows and controls (the hub). Each runs its own servedev; the hub reaches its API over one SSH connection. Their servers' ids get the machine's name in front: pc/demo:api. Add with `servedev remote add <name> <user@host>`; tokens are kept in the Keychain (macOS) or ~/.servedev/machines, never here.",
+      "propertyNames": {
+        "pattern": "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "ssh"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ssh": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ssh destination: user@host (e.g. a Tailscale address) or a Host alias from ~/.ssh/config. Must work without a password prompt (a key)."
+          },
+          "kind": {
+            "enum": [
+              "posix",
+              "wsl"
+            ],
+            "description": "Detected when it connects: posix (macOS/Linux) or wsl (Windows, with servers running in WSL)."
+          },
+          "distro": {
+            "type": "string",
+            "pattern": "^[\\w.-]+$",
+            "description": "WSL distro the servers run in (detected; set it to pick another)."
+          }
+        }
+      }
     }
   }
 }

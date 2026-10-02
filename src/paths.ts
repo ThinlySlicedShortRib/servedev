@@ -14,6 +14,8 @@ export const DB_FILE = path.join(HOME, "servedev.db");
 export const LOCAL_CONFIG = path.join(HOME, "config.json");
 export const TOKEN_FILE = path.join(HOME, "token");
 export const DAEMON_LOG = path.join(HOME, "daemon.log");
+/** Remote machines: SSH control sockets, last known state, and (off macOS) their tokens. */
+export const MACHINES_DIR = path.join(HOME, "machines");
 export const DAEMON_PORT = Number(process.env.SERVEDEV_PORT ?? 7777);
 export const DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`;
 
