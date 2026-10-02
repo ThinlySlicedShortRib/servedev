@@ -194,7 +194,9 @@ export function App() {
   }
 
   const [selected, setSelected] = React.useState<string | null>(() => decodeURIComponent(location.hash.slice(1)) || null)
-  const current = entries.find((e) => e.key === selected) ?? entries.find((e) => ACTIVE.includes(e.server?.status as never)) ?? entries[0]
+  // Nothing picked yet: the first running server (one we can reach, not an offline machine's last known).
+  const current =
+    entries.find((e) => e.key === selected) ?? entries.find((e) => ACTIVE.includes(e.server?.status as never) && !e.server?.stale) ?? entries[0]
 
   const [creating, setCreating] = React.useState(false)
 

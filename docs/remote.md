@@ -55,6 +55,14 @@ servedev remote boot pc --install   # or registers the task over SSH
 
 The task is a logon task named `servedev-wsl` that runs `conhost.exe --headless wsl.exe -d <distro> -e /bin/bash -l ~/.servedev/wsl-boot.sh` with no execution time limit (Task Scheduler stops tasks after 3 days by default). The script starts `servedev daemon run --autostart` if it isn't running and then stays attached. It runs at logon, not at boot: starting WSL before anyone logs in needs a task that stores your Windows password ("Run whether user is logged on or not"), which you can set in Task Scheduler.
 
+## In the dashboard
+
+Once a machine is added, the sidebar groups servers by machine: this one first, then each other machine with its own projects. A machine's header shows its state, how many of its servers run (and crashed), and folds its servers away; while it's reconnecting or offline a second line says so, with **Retry**. A remote server's row shows the port it has on its machine; the link opens it here (at `<server>.<machine>.localhost`, or the forwarded port). An offline machine's servers stay in the list, dimmed, with their last known state, and count in the status filters that way.
+
+**Machines** (next to Accounts) lists the machines: state, system, address, servedev version, servers and forwarded ports, with Reconnect now, Show only its servers, Copy SSH command, Start with Windows (the boot task below) and Remove. **Add machine** there runs the same checklist as `remote add`.
+
+A remote server's page says which machine it's on, where its address here leads (`→ pc:3000`, and the local port when that one was busy here), and pauses its actions while the machine isn't connected. Remote servers can go on the unsaved custom grid (with a small machine tag); profiles can't hold them yet.
+
 ## API (for the dashboard and other clients)
 
 All under the hub's token, like the rest of the API.
@@ -73,7 +81,7 @@ Every endpoint that takes a server id or name (start, stop, restart, remove, pin
 
 ## Limits
 
-- No state is synced: profiles, grids and pins can't include another machine's servers yet.
+- No state is synced: profiles (and their grids) and pins here can't include another machine's servers yet; the unsaved grid can. Pinning a remote server pins it on its machine.
 - Remote servers' own custom hostnames (set on that machine) aren't routed by the hub's proxy; their hub hostname is `<server>.<machine>.localhost`.
 - POSIX machines need a login shell that runs POSIX scripts (bash, zsh; not fish).
 - servedev itself doesn't run on Windows outside WSL.

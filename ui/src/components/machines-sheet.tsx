@@ -73,7 +73,15 @@ export function MachinesSheet({ servers }: { servers: Map<string, Server> }) {
   const [booting, setBooting] = React.useState<Machine | null>(null)
   const worst = worstState(machines.list)
   const local = [...servers.values()].filter((s) => !s.machine)
-  const hubVersion = machines.list[0]?.hubVersion
+  // This servedev's version (each machine's summary carries it too).
+  const [ownVersion, setOwnVersion] = React.useState<string>()
+  React.useEffect(() => {
+    if (open && !ownVersion && !machines.list.length)
+      api<{ version: string }>("/api/health")
+        .then((r) => setOwnVersion(r.version))
+        .catch(() => {})
+  }, [open, ownVersion, machines.list.length])
+  const hubVersion = machines.list[0]?.hubVersion ?? ownVersion
 
   async function remove(m: Machine) {
     setRemoving(null)

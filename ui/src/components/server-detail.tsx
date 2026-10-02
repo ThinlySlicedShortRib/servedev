@@ -77,6 +77,10 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
   const down = !!s?.machine && (s.stale || (!!machine && machine.state !== "connected"))
   const locked = !!busy || down
   const href = down ? undefined : openUrl(s)
+  // Processes and Preview need the machine; fall back to the logs tab while it's away.
+  React.useEffect(() => {
+    if (down) setTab("logs")
+  }, [down])
   const remotePort = s?.machine ? remotePortOf(s) : undefined
   const localPort = s?.machine ? localPortOf(s) : undefined
   const groups = useProcessGroups(
@@ -387,7 +391,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
                         : "Write how to run it into the repo's servedev.json, so it's shared through git and works on any machine"
                     }
                   >
-                    <Button size="xs" variant="outline" onClick={() => setSavingConfig(true)}>
+                    <Button size="xs" variant="outline" disabled={down} onClick={() => setSavingConfig(true)}>
                       <SaveIcon data-icon="inline-start" />
                       {s.config === "differs" ? "Update servedev.json" : "Save to servedev.json"}
                     </Button>
@@ -539,7 +543,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               <TabsTrigger value="logs">Logs</TabsTrigger>
             </Hint>
             <Hint label="Every process it started, grouped by process group, with their ports">
-              <TabsTrigger value="processes" disabled={!s}>
+              <TabsTrigger value="processes" disabled={!s || down}>
                 Processes
                 {active && groups && (
                   <span className="text-muted-foreground tabular-nums studio:rounded-[4px] studio:bg-foreground/[0.06] studio:px-1 studio:text-[11px] studio:leading-4 friendly:rounded-full friendly:bg-muted-foreground/12 friendly:px-1.5 friendly:text-xs friendly:leading-5">
@@ -550,7 +554,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
               </TabsTrigger>
             </Hint>
             <Hint label="The running app itself, inside this page">
-              <TabsTrigger value="preview" disabled={!s}>
+              <TabsTrigger value="preview" disabled={!s || down}>
                 Preview
               </TabsTrigger>
             </Hint>
@@ -558,15 +562,18 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
         </div>
         <TabsContent value="logs" className="flex min-h-0 flex-1 flex-col">
           <LogView
-            key={entry.key}
-            serverId={s?.id}
+            key={down ? `${entry.key}:down` : entry.key}
+            // Its machine isn't connected: no log to read until it's back.
+            serverId={down ? undefined : s?.id}
             command={s?.command}
             runId={s?.runId}
             status={s?.status}
             placeholder={
-              s
-                ? undefined
-                : "This server is defined in servedev.json but hasn't been started."
+              down
+                ? `${s!.machine} isn't connected, so its logs can't be read right now. They're back when it reconnects.`
+                : s
+                  ? undefined
+                  : "This server is defined in servedev.json but hasn't been started."
             }
           />
         </TabsContent>
