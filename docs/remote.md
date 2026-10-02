@@ -5,7 +5,7 @@ One servedev (the **hub**, usually your laptop) can show and control the servers
 ```sh
 servedev remote add pc ariel@100.68.42.78   # connect and check, step by step
 servedev ls --all                            # MACHINE column; pc's servers are pc/<project>:<name>
-servedev logs api --on pc -f                 # --on <machine> for start, stop, restart, logs, status, ls
+servedev logs api --on pc -f                 # --on <machine> for start, stop, restart, logs, status, search, ls
 servedev restart pc/demo:api                 # or the full id, anywhere a server name goes
 curl http://api.pc.localhost:7780            # each running server's port, forwarded here
 servedev remote ls                           # connected / reconnecting / offline, versions, forwards
@@ -69,7 +69,7 @@ All under the hub's token, like the rest of the API.
 | `POST /api/machines/boot` `{ name, install? }` | `{ supported, script, powershell, installed?, note? }` |
 | `GET /api/stream/events` | The snapshot has `machines`; remote servers arrive as `server` / `remove` events with `pc/` ids; `machine` (a MachineSummary) when a machine's state or forwards change; `machine-removed` `{ name }` |
 
-Every endpoint that takes a server id or name (start, stop, restart, remove, pin, hostname, wait, logs, runs, processes, the log streams, bulk start/stop, search) accepts `pc/<id>` or `pc/<name>` and is relayed. A remote server is started by id; defining a new one (a command) has to happen on its machine for now. Types: `MachineSummary`, `SetupStep` and `RemoteServerView` in `src/remote/types.ts`.
+Every endpoint that takes a server id or name (start, stop, restart, remove, pin, hostname, wait, logs, runs, processes, the log streams, bulk start/stop, search) accepts `pc/<id>` or `pc/<name>` and is relayed. `POST /api/search` also takes `machine` to search every server on that machine. A remote server is started by id; defining a new one (a command) has to happen on its machine for now. Types: `MachineSummary`, `SetupStep` and `RemoteServerView` in `src/remote/types.ts`.
 
 ## Limits
 
