@@ -262,8 +262,14 @@ export class Machine extends EventEmitter {
     if (transport.kind === "wsl") {
       // WSL shuts its VM down (killing every server) once no Windows process is attached to it.
       // This session keeps it up while we're connected, and ends if WSL restarts.
-      this.hold = transport.hold("exec cat >/dev/null");
-      void this.hold.exited.then(() => this.lost(gen, "the WSL session ended (WSL shut down or restarted?)"));
+      const hold = transport.hold("exec cat >/dev/null");
+      const since = this.now();
+      this.hold = hold;
+      void hold.exited.then(() => {
+        // Ending right away means it can't run at all; reconnecting would just loop.
+        if (this.now() - since < 10_000) return void this.emit("warning", `couldn't hold a WSL session open: ${hold.stderr().trim() || "it exited"}`);
+        this.lost(gen, "the WSL session ended (WSL shut down or restarted?)");
+      });
     }
     const events = new AbortController();
     this.events = events;

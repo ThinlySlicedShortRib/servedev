@@ -107,6 +107,17 @@ servedev account remove fly
 
 See [docs/providers.md](docs/providers.md) for the format.
 
+### Other machines
+
+```sh
+servedev remote add pc me@100.68.42.78   # another computer running servedev (e.g. a Windows PC with servers in WSL)
+servedev ls --all                        # its servers too: pc/demo:api
+servedev logs api --on pc -f             # --on <machine>, or pc/<name> anywhere a name goes
+curl http://api.pc.localhost:7780        # its ports, forwarded here
+```
+
+This servedev becomes a hub: it keeps one SSH connection per machine and talks to that machine's own servedev through it, forwarding the ports its servers listen on. Machines show as connected, reconnecting or offline (with their last known servers). See [docs/remote.md](docs/remote.md), including starting servedev when a Windows PC boots.
+
 ### servedev.json (optional)
 
 ```json

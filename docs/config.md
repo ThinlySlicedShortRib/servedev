@@ -15,6 +15,7 @@ Other files in `~/.servedev`:
 | `credentials/gcloud/*.json` | Saved Google app credentials, readable only by you. Never shared. |
 | `servedev.db` | State: runs, pids, ports, log markers, what each run started with. Deleting it loses history only. |
 | `logs/` | One log file per run |
+| `machines/` | Other machines: last known servers, SSH control sockets, and (off macOS) their API tokens, readable only by you. See [remote.md](remote.md). |
 
 Both config files accept comments (JSONC) and have JSON Schemas for editor autocomplete: [`schema/servedev.schema.json`](../schema/servedev.schema.json) and [`schema/config.schema.json`](../schema/config.schema.json). The daemon also serves them at `http://127.0.0.1:7777/schema/<name>.json`.
 
@@ -89,12 +90,16 @@ Every server and profile remembers where it came from. The dashboard tags shared
     }
   },
   "pinned": ["my-app:api"],
-  "settings": { "log_retention_days": 14 }
+  "settings": { "log_retention_days": 14 },
+  "machines": {
+    "pc": { "ssh": "me@100.68.42.78", "kind": "wsl", "distro": "Ubuntu" }  // servedev remote add pc me@100.68.42.78
+  }
 }
 ```
 
 - **Server ids** are `<project>:<name>`. The project name comes from `projects`, so local profiles keep working when a repo moves.
 - **Overrides** are keyed by the repo's git remote (or `folder:<name>` without one) plus the profile name, so your accounts, skipped servers and grid apply in every worktree of the repo.
+- **Machines** are other computers running servedev whose servers this one shows and controls over SSH; their ids get the machine's name in front (`pc/my-app:api`). Only `ssh` is needed (`user@host`, `ssh://user@host:port`, or a Host from `~/.ssh/config`); `kind` (`posix` or `wsl`) and `distro` are detected when it connects and kept so you can see and change them. The machine's API token is never stored here (Keychain on macOS, else `~/.servedev/machines/<name>.token`). Adding, removing or changing an entry by hand connects, disconnects or reconnects it. See [remote.md](remote.md).
 
 ## Worktrees
 

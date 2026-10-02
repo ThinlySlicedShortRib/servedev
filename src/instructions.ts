@@ -22,6 +22,8 @@ Cloud accounts: \`servedev account\` shows this machine's Google Cloud / GitHub 
 
 Environment: servers get a fresh login-shell environment at every start, plus only the variables set on purpose (\`--env KEY=VALUE\`, or \`env\` in servedev.json) — not the environment of the shell you run servedev in. To share a server with the team, \`servedev save <name>\` writes it into the repo's servedev.json (credentials in the command are stripped).
 
+Other machines: ids like \`pc/demo:api\` are servers on another computer (\`servedev remote ls\`); they take the same commands (\`servedev logs api --on pc\`), and their URLs in \`servedev ls --all\` are forwarded to this machine.
+
 After code changes, the dev server usually hot-reloads — check \`servedev search --errors --since 1m\` instead of restarting.
 If start fails, the output includes the last log lines; fix the cause, then run start again.
 Stop servers you started when you are done unless the user wants them left running.

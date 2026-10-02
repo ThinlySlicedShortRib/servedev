@@ -2073,7 +2073,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       const ids = local.map((ref) => resolveRef(undefined, String(ref), false).id);
       const backlog = Number(q.get("backlog") ?? 24 * 1024);
       // A machine's servers come over one upstream stream of its own, ids prefixed on the way through.
-      const upstream = [...remote].map(([m, remoteIds]) => ({ m, api: m.liveApi(), remoteIds }));
+      // An unreachable machine's tiles just stay quiet; the others (and local ones) still stream.
+      const upstream = [...remote].flatMap(([m, remoteIds]) => (m.connected ? [{ m, api: m.liveApi(), remoteIds }] : []));
       return sse(req, (send) => {
         const polls = ids.map((id) => followLog(id, backlog, () => send("reset", { id }), (text) => send("data", { id, text })));
         const tick = () => polls.forEach((poll) => poll());
