@@ -10,22 +10,33 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TruncatedText } from "@/components/hint"
+import { MachineIcon, StateDot } from "@/components/machine-ui"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
+import { useMachines } from "@/hooks/use-machines"
 import type { Profile, Server } from "@/lib/api"
 
 function runningCount(p: Profile, servers: Map<string, Server>) {
   return p.servers.filter((id) => ["running", "starting"].includes(servers.get(id)?.status ?? "")).length
 }
 
-/** The one project all of a profile's servers are in, if any: sharing puts it in that repo. */
+/**
+ * The one project all of a profile's servers are in, if any: sharing puts it in that repo. A
+ * profile with servers on other machines can't be shared (a repo's profile starts one machine's servers).
+ */
 export function shareTarget(p: Profile, servers: Map<string, Server>): string | undefined {
+  if (p.kind !== "local" || p.members.some((id) => id.includes("/"))) return undefined
   const projects = new Set(p.servers.map((id) => servers.get(id)?.project ?? id.split(":")[0]))
-  return p.kind === "local" && projects.size === 1 ? [...projects][0] : undefined
+  return projects.size === 1 ? [...projects][0] : undefined
 }
 
-/** "Shared · shop · main" or "Yours" */
+/** Other machines a profile of yours has servers on. */
+export function profileMachines(p: Profile): string[] {
+  return [...new Set(p.members.flatMap((id) => (id.includes("/") ? [id.slice(0, id.indexOf("/"))] : [])))]
+}
+
+/** "Shared in shop · main", "Shared in demo on pc", or "Yours" */
 export function profileOrigin(p: Profile): string {
-  return p.kind === "shared" ? `Shared in ${p.project}${p.branch ? ` · ${p.branch}` : ""}` : "Yours"
+  return p.kind === "shared" ? `Shared in ${p.project}${p.machine ? ` on ${p.machine}` : ""}${p.branch ? ` · ${p.branch}` : ""}` : "Yours"
 }
 
 /** Switches the sidebar between all servers and a profile's servers. Switching never stops anything. */
@@ -54,14 +65,30 @@ export function ProfileSwitcher({
   gridMode?: boolean
 }) {
   const noneLabel = gridMode ? "Unsaved grid" : "All servers"
+  const machines = useMachines()
   const mine = profiles.filter((p) => p.kind === "local")
-  const shared = profiles.filter((p) => p.kind === "shared")
+  const shared = profiles.filter((p) => p.kind === "shared" && !p.machine)
+  // Shared in repos on other machines: grouped by machine, in the sidebar's machine order.
+  const elsewhere = machines.list
+    .map((m) => [m, profiles.filter((p) => p.kind === "shared" && p.machine === m.name)] as const)
+    .filter(([, list]) => list.length > 0)
 
-  const item = (p: Profile) => (
+  const item = (p: Profile) => {
+    // Your profile's servers on other machines: which machines, and whether any is away.
+    const others = p.kind === "local" ? profileMachines(p) : []
+    const away = others.map((n) => machines.get(n)).filter((m) => m && m.state !== "connected")
+    return (
     <DropdownMenuItem key={p.id} onClick={() => onChange(p.id)}>
       {p.kind === "shared" ? <UsersIcon className="text-muted-foreground" /> : <LayersIcon className="text-muted-foreground" />}
       <div className="grid min-w-0 flex-1 leading-tight">
         <TruncatedText text={p.name} />
+        {others.length > 0 && (
+          <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <MachineIcon machine={machines.get(others[0])} className="size-3 shrink-0" />
+            <TruncatedText text={`with ${others.join(", ")}${away.length ? ` · ${away.map((m) => `${m!.name} ${m!.state}`).join(", ")}` : ""}`} />
+            {away.length > 0 && <StateDot state={away[0]!.state} />}
+          </span>
+        )}
         {p.kind === "shared" && (
           <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
             <TruncatedText text={p.project ?? ""} />
@@ -80,7 +107,8 @@ export function ProfileSwitcher({
       </span>
       {active?.id === p.id && <CheckIcon />}
     </DropdownMenuItem>
-  )
+    )
+  }
 
   const target = active && shareTarget(active, servers)
 
@@ -137,11 +165,24 @@ export function ProfileSwitcher({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
-                    <DropdownMenuLabel>Shared in repos</DropdownMenuLabel>
+                    <DropdownMenuLabel>Shared in repos{elsewhere.length ? ` on ${machines.localName.replace(/^This /, "this ")}` : ""}</DropdownMenuLabel>
                     {shared.map(item)}
                   </DropdownMenuGroup>
                 </>
               )}
+              {elsewhere.map(([m, list]) => (
+                <div key={m.name}>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel className="flex items-center gap-1.5">
+                      <MachineIcon machine={m} className="size-3" />
+                      Shared in repos on {m.name}
+                      {m.state !== "connected" && <StateDot state={m.state} />}
+                    </DropdownMenuLabel>
+                    {list.map(item)}
+                  </DropdownMenuGroup>
+                </div>
+              ))}
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={onNew}>
@@ -160,7 +201,11 @@ export function ProfileSwitcher({
                         <div className="grid leading-tight">
                           <span>Share with the repo…</span>
                           <span className="text-xs text-muted-foreground">
-                            {target ? `Moves it into ${target}'s servedev.json` : "Its servers must all be from one repo"}
+                            {target
+                              ? `Moves it into ${target}'s servedev.json`
+                              : profileMachines(active).length
+                                ? "It has servers on other machines; a repo's profile starts one machine's"
+                                : "Its servers must all be from one repo"}
                           </span>
                         </div>
                       </DropdownMenuItem>

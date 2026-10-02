@@ -31,16 +31,15 @@ export function SaveGridDialog({
     }
   }, [open])
 
-  // Profiles can't hold another machine's servers yet ("pc/..." ids): those tiles stay behind.
-  const own = items.filter((it) => !it.i.includes("/"))
-  const remote = items.length - own.length
+  // Tiles of servers on other machines ("pc/..." ids) go along: each starts on its own machine.
+  const machines = [...new Set(items.flatMap((it) => (it.i.includes("/") ? [it.i.slice(0, it.i.indexOf("/"))] : [])))]
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
     setError(null)
     try {
-      const { profile } = await api<{ profile: Profile }>("/api/profiles", { name: name.trim(), layout: own, source: CLIENT_ID })
+      const { profile } = await api<{ profile: Profile }>("/api/profiles", { name: name.trim(), layout: items, source: CLIENT_ID })
       onSaved(profile)
       onOpenChange(false)
     } catch (err) {
@@ -56,10 +55,10 @@ export function SaveGridDialog({
         <DialogHeader>
           <DialogTitle>Save grid as a profile</DialogTitle>
           <DialogDescription>
-            The {own.length} {own.length === 1 ? "server" : "servers"} on this grid become a profile with this layout. Pick it from the
+            The {items.length} {items.length === 1 ? "server" : "servers"} on this grid become a profile with this layout. Pick it from the
             switcher to come back to it, or start all of them at once.
-            {remote > 0 &&
-              ` ${remote === 1 ? "The server" : `The ${remote} servers`} from other machines can't be part of a profile yet, so ${remote === 1 ? "it isn't" : "they aren't"} included.`}
+            {machines.length > 0 &&
+              ` Servers on ${machines.join(" and ")} stay on ${machines.length === 1 ? "that machine" : "their machines"}: starting the profile starts each one there.`}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="flex flex-col gap-6">
@@ -77,7 +76,7 @@ export function SaveGridDialog({
           </FieldGroup>
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit" disabled={!name.trim() || saving || own.length === 0}>
+            <Button type="submit" disabled={!name.trim() || saving || items.length === 0}>
               {saving && <Spinner data-icon="inline-start" />}
               Save profile
             </Button>

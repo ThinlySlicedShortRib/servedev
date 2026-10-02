@@ -111,11 +111,14 @@ export function App() {
     : { scope: "all servers", ids: entries.flatMap((e) => (e.server ? [e.server.id] : [])) }
   const bulkServers = bulk.ids.flatMap((id) => (servers.get(id) ? [servers.get(id)!] : []))
   const [savingGrid, setSavingGrid] = React.useState(false)
-  // Profiles (and so their grids) can't hold another machine's servers yet; the unsaved grid can.
-  const gridBlocked = (id: string) =>
-    activeProfile && servers.get(id)?.machine
-      ? `Profiles can't include servers on other machines yet. Switch to the unsaved grid (no profile) to put ${servers.get(id)!.name} on a grid.`
-      : undefined
+  // Your profiles' grids (and the unsaved one) take any server, on any machine. A shared profile
+  // belongs to one repo on one machine, so its grid holds that repo's servers.
+  const gridBlocked = (id: string) => {
+    const s = servers.get(id)
+    const p = activeProfile
+    if (!p || p.kind !== "shared" || !s || ((s.machine ?? "") === (p.machine ?? "") && s.project === p.project)) return undefined
+    return `${p.name} is shared in ${p.project}${p.machine ? ` on ${p.machine}` : ""}, so its grid holds that repo's servers. Use a profile of your own to mix projects and machines.`
+  }
 
   const [editing, setEditing] = React.useState<{ profile?: Profile } | null>(null)
   const [deleting, setDeleting] = React.useState<Profile | null>(null)
@@ -468,7 +471,7 @@ export function App() {
             <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleting?.kind === "shared"
-                ? `It's removed from ${deleting.project}'s servedev.json, so once you commit, nobody on the repo has it. Your own changes to it go too. Its servers keep running and stay in the list.`
+                ? `It's removed from ${deleting.project}'s servedev.json${deleting.machine ? ` on ${deleting.machine}` : ""}, so once you commit, nobody on the repo has it. Your own changes to it go too. Its servers keep running and stay in the list.`
                 : "Only the profile is removed. Its servers keep running and stay in the list."}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -2,6 +2,7 @@ import * as React from "react"
 import { GitBranchIcon, UsersIcon } from "@/components/icons"
 
 import { Hint, TruncatedText } from "@/components/hint"
+import { MachineIcon, StateDot } from "@/components/machine-ui"
 import { ProfileAccounts } from "@/components/profile-accounts"
 import { StatusDot } from "@/components/status-dot"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -11,10 +12,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { useMachines } from "@/hooks/use-machines"
 import { ACTIVE, api, type Profile, type Selections, type Server } from "@/lib/api"
 
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/
@@ -28,9 +29,10 @@ function overlay(base: Selections, top: Selections): Selections {
 
 /**
  * Create a profile, or edit one when `profile` is set. Servers start in the order they were ticked.
- * A shared profile (from a repo's servedev.json) edits that file for its servers, order,
- * description and what its servers need; which servers you skip and your own accounts stay in
- * your config.
+ * Yours can hold servers from any project on any machine (listed by machine, then project). A
+ * shared profile (from a repo's servedev.json) edits that file for its servers, order, description
+ * and what its servers need; which servers you skip and your own accounts stay in your config. One
+ * shared on another machine is edited there, and holds that machine's servers of its repo.
  */
 export function ProfileDialog({
   open,
@@ -46,6 +48,8 @@ export function ProfileDialog({
   onSaved: (p: Profile) => void
 }) {
   const shared = profile?.kind === "shared"
+  const machines = useMachines()
+  const there = profile?.machine
   const [name, setName] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [members, setMembers] = React.useState<string[]>([])
@@ -60,10 +64,8 @@ export function ProfileDialog({
     if (!open) return
     setName(profile?.name ?? "")
     setDescription(profile?.description ?? "")
-    // A new profile starts from whatever is running now.
-    setMembers(
-      profile ? profile.members : [...servers.values()].filter((s) => ACTIVE.includes(s.status) && !s.machine).map((s) => s.id)
-    )
+    // A new profile starts from whatever is running now, here and on connected machines.
+    setMembers(profile ? profile.members : [...servers.values()].filter((s) => ACTIVE.includes(s.status) && !s.stale).map((s) => s.id))
     setSkipped(profile?.skipped ?? [])
     setAccounts((profile?.kind === "shared" ? profile.mine : profile?.accounts) ?? {})
     setNeeds(profile?.needs ?? {})
@@ -72,25 +74,36 @@ export function ProfileDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, profile])
 
-  // A shared profile can only hold its own repo's (worktree's) servers.
+  // A shared profile can only hold its own repo's (worktree's) servers, on its own machine.
   const choices = React.useMemo(
-    // Another machine's servers can't be in a profile yet.
-    () => [...servers.values()].filter((s) => !s.machine && (!shared || s.project === profile!.project)),
-    [servers, shared, profile]
+    () => [...servers.values()].filter((s) => !shared || ((s.machine ?? "") === (there ?? "") && s.project === profile!.project)),
+    [servers, shared, there, profile]
   )
-  const byProject = React.useMemo(() => {
-    const groups = new Map<string, Server[]>()
+  // By machine (this one first, then the others in the sidebar's order), then project.
+  const byMachine = React.useMemo(() => {
+    const order = ["", ...machines.list.map((m) => m.name)]
+    const groups = new Map<string, Map<string, Server[]>>()
     for (const s of choices) {
-      if (!groups.has(s.project)) groups.set(s.project, [])
-      groups.get(s.project)!.push(s)
+      const m = s.machine ?? ""
+      if (!groups.has(m)) groups.set(m, new Map())
+      const projects = groups.get(m)!
+      if (!projects.has(s.project)) projects.set(s.project, [])
+      projects.get(s.project)!.push(s)
     }
     return [...groups.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([p, list]) => [p, list.sort((a, b) => a.name.localeCompare(b.name))] as const)
-  }, [choices])
+      .sort(([a], [b]) => (order.indexOf(a) + 1 || 999) - (order.indexOf(b) + 1 || 999) || a.localeCompare(b))
+      .map(([machine, projects]) => ({
+        machine,
+        projects: [...projects.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([p, list]) => [p, list.sort((a, b) => a.name.localeCompare(b.name))] as const),
+      }))
+  }, [choices, machines.list])
+  const showMachines = byMachine.some((g) => g.machine)
 
   const memberProjects = [...new Set(members.map((id) => servers.get(id)?.project).filter(Boolean))] as string[]
-  const canShare = memberProjects.length === 1
+  const memberMachines = [...new Set(members.flatMap((id) => (id.includes("/") ? [id.slice(0, id.indexOf("/"))] : [])))]
+  const canShare = memberProjects.length === 1 && memberMachines.length === 0
   const sharing = shared || (share && canShare)
   const emailInNeeds = Object.values(needs).some((sel) => Object.values(sel).some((v) => EMAIL.test(v)))
 
@@ -115,8 +128,9 @@ export function ProfileDialog({
           description,
           servers: members,
           ...(removed.length ? { remove: removed } : {}),
-          accounts,
-          ...(shared ? { needs, skip: skipped.filter((id) => members.includes(id)) } : {}),
+          // Another machine's profile keeps its accounts there (they're set on that machine).
+          ...(there ? {} : { accounts }),
+          ...(shared ? { ...(there ? {} : { needs }), skip: skipped.filter((id) => members.includes(id)) } : {}),
         })
       } else {
         r = await api<{ profile: Profile }>("/api/profiles", {
@@ -148,6 +162,12 @@ export function ProfileDialog({
                 Shared · {profile!.project}
               </Badge>
             )}
+            {there && (
+              <Badge variant="outline">
+                <MachineIcon machine={machines.get(there)} data-icon="inline-start" />
+                on {there}
+              </Badge>
+            )}
             {shared && profile!.branch && (
               <Badge variant="outline" className="font-mono">
                 <GitBranchIcon data-icon="inline-start" />
@@ -159,11 +179,12 @@ export function ProfileDialog({
             {shared ? (
               <>
                 Its servers, order, description and what they need are saved to <span className="font-mono break-all">{profile!.file}</span>
+                {there ? ` on ${there}` : ""}
                 {profile!.uncommitted ? ", which has uncommitted changes" : ""}. Commit it to share the change. Skipped servers and your own
-                accounts stay in your config.
+                accounts stay in your config{there ? ` there` : ""}.
               </>
             ) : (
-              "A profile is a set of servers you work on together, from any project. Switching to it shows just those servers; starting it leaves everything else running."
+              `A profile is a set of servers you work on together, from any project${machines.hasRemotes ? " and any machine" : ""}. Switching to it shows just those servers; starting it leaves everything else running.`
             )}
           </DialogDescription>
         </DialogHeader>
@@ -187,22 +208,38 @@ export function ProfileDialog({
               <FieldLegend variant="label">Servers</FieldLegend>
               <FieldDescription>
                 They start in the order you tick them, so tick an API before the apps that use it.
-                {shared && " Only this repo's servers can be in a shared profile. Turn off the switch to skip one yourself without changing it for the team."}
-                {[...servers.values()].some((s) => s.machine) && " Servers on other machines can't be in a profile yet."}
+                {!shared && showMachines && " Each starts on its own machine, after the previous one is ready; ones on a machine that's away are skipped."}
+                {shared && ` Only this repo's servers${there ? ` on ${there}` : ""} can be in a shared profile. Turn off the switch to skip one yourself without changing it for the team.`}
               </FieldDescription>
               {choices.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No servers yet. Start one, then add it here.</p>
               ) : (
-                <ScrollArea className="max-h-72 rounded-lg border">
+                <div className="max-h-72 overflow-y-auto overscroll-contain rounded-lg border">
                   <div className="flex flex-col py-1">
-                    {byProject.map(([project, list]) => (
+                    {byMachine.map(({ machine, projects }) => {
+                      const m = machines.get(machine)
+                      return (
+                      <div key={machine || "\u0000here"} className="flex flex-col" role="group" aria-label={machine || machines.localName}>
+                        {showMachines && (
+                          <span className="flex items-center gap-1.5 border-b px-3 pt-2.5 pb-1.5 text-xs font-medium first:pt-1.5">
+                            <MachineIcon machine={m} className="size-3.5 text-muted-foreground" />
+                            {machine || machines.localName}
+                            {m && m.state !== "connected" && (
+                              <span className="flex items-center gap-1 font-normal text-muted-foreground">
+                                <StateDot state={m.state} />
+                                {m.state}, last known
+                              </span>
+                            )}
+                          </span>
+                        )}
+                    {projects.map(([project, list]) => (
                       <div key={project} className="flex flex-col">
-                        <span className="px-3 pt-2 pb-1 text-xs text-muted-foreground">{project}</span>
+                        <span className={showMachines ? "px-3 pt-2 pb-1 pl-8 text-xs text-muted-foreground" : "px-3 pt-2 pb-1 text-xs text-muted-foreground"}>{project}</span>
                         {list.map((s) => {
                           const position = members.indexOf(s.id)
                           const isSkipped = skipped.includes(s.id)
                           return (
-                            <div key={s.id} className="flex items-center gap-3 px-3 py-1.5 hover:bg-muted/50">
+                            <div key={s.id} className={showMachines ? "flex items-center gap-3 py-1.5 pr-3 pl-8 hover:bg-muted/50" : "flex items-center gap-3 px-3 py-1.5 hover:bg-muted/50"}>
                               <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                                 <Checkbox checked={position >= 0} onCheckedChange={(v) => toggle(s.id, v)} />
                                 <StatusDot status={s.status} />
@@ -231,8 +268,11 @@ export function ProfileDialog({
                         })}
                       </div>
                     ))}
+                      </div>
+                      )
+                    })}
                   </div>
-                </ScrollArea>
+                </div>
               )}
             </FieldSet>
             {!profile && (
@@ -242,13 +282,27 @@ export function ProfileDialog({
                   <FieldDescription>
                     {canShare
                       ? `Saved to ${memberProjects[0]}'s servedev.json, so everyone who clones it gets this profile once you commit.`
-                      : "Only possible when all its servers are from one repo."}
+                      : memberMachines.length
+                        ? `Only for servers of one repo on this machine (it has servers on ${memberMachines.join(", ")}).`
+                        : "Only possible when all its servers are from one repo."}
                   </FieldDescription>
                 </FieldContent>
                 <Switch id="profile-share" checked={share && canShare} disabled={!canShare} onCheckedChange={setShare} />
               </Field>
             )}
-            {shared ? (
+            {there ? (
+              <FieldSet>
+                <FieldLegend variant="label">Accounts</FieldLegend>
+                <FieldDescription>
+                  {Object.keys(profile!.accounts).length
+                    ? `Its servers use ${Object.entries(profile!.accounts)
+                        .map(([provider, sel]) => `${provider} ${Object.values(sel).join(", ")}`)
+                        .join("; ")}, signed in on ${there}. `
+                    : `Its servers use the accounts signed in on ${there}. `}
+                  Accounts are {there}'s, so they're picked there: <span className="font-mono">servedev profile accounts "{profile!.name}" …</span> sets them on {there}.
+                </FieldDescription>
+              </FieldSet>
+            ) : shared ? (
               <>
                 <ProfileAccounts
                   legend="What its servers need"
@@ -279,7 +333,9 @@ export function ProfileDialog({
                 description={
                   sharing
                     ? "Servers in this profile use these instead of this machine's accounts. Values like a project go to servedev.json; personal accounts (emails) stay in your config."
-                    : undefined
+                    : memberMachines.length
+                      ? `Its servers on this machine use these instead of this machine's accounts. Ones on ${memberMachines.join(", ")} use the accounts signed in there.`
+                      : undefined
                 }
               />
             )}
@@ -293,7 +349,7 @@ export function ProfileDialog({
             <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
             <Button type="submit" disabled={!name.trim() || saving}>
               {saving && <Spinner data-icon="inline-start" />}
-              {profile ? (shared ? "Save to servedev.json" : "Save profile") : sharing ? "Create shared profile" : "Create profile"}
+              {profile ? (shared ? `Save to servedev.json${there ? ` on ${there}` : ""}` : "Save profile") : sharing ? "Create shared profile" : "Create profile"}
             </Button>
           </DialogFooter>
         </form>

@@ -174,6 +174,10 @@ export interface Profile {
   /** Version of its file, so an edit doesn't overwrite a newer one. */
   version: string
   grid: { source: "repo" | "override" | "local" | null; hasRepoDefault: boolean; hasOverride: boolean }
+  /** Members on a machine that isn't connected right now (their last known state shows). */
+  unavailable?: string[]
+  /** Shared in a repo on this other machine; everything done to it happens there. */
+  machine?: string
 }
 
 export interface AccountOption {

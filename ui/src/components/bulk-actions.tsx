@@ -92,7 +92,7 @@ export function BulkActions({ servers, scope, profileId }: { servers: Server[]; 
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm === "start"
-                ? `They start one at a time, in this order, each after the previous one is ready${severalMachines ? " (each machine starts its own, alongside the others)" : ""}. Servers that are already running are left alone.`
+                ? `They start one at a time, in this order, each after the previous one is ready${severalMachines ? (profileId ? ", each on its own machine" : " (each machine starts its own, alongside the others)") : ""}. Servers that are already running are left alone.`
                 : "Each server and every process it started is shut down. Logs are kept, and you can start them again any time."}
             </AlertDialogDescription>
           </AlertDialogHeader>

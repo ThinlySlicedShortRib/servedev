@@ -35,7 +35,7 @@ import { SERVER_MIME } from "@/lib/drag"
 import { BranchTag } from "@/components/branch-tag"
 import { Hint, TruncatedText } from "@/components/hint"
 import { branchOf, filterGroups, statusGroup, type Entry, type StatusFilter } from "@/lib/entries"
-import { MachineHeader, MachineRailMarker } from "@/components/machine-ui"
+import { MachineHeader, MachineRailMarker, MachineTag } from "@/components/machine-ui"
 import { useMachineFolds, useMachines } from "@/hooks/use-machines"
 import { localPortOf, machineSections, remotePortOf } from "@/lib/machines"
 
@@ -194,6 +194,8 @@ export function AppSidebar({
                   {friendly && <ProjectAvatar name={project} />}
                   <TruncatedText text={project} />
                   {entries.map(branchOf).find(Boolean) && <BranchTag branch={entries.map(branchOf).find(Boolean)!} className="shrink" />}
+                  {/* Listed without machine sections (a profile's servers): say which machine it's on. */}
+                  {!sectionMachine && machine && <MachineTag machine={machine} className="pointer-events-auto" />}
                 </span>
               )}
             </SidebarGroupLabel>
