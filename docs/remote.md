@@ -10,6 +10,9 @@ servedev restart pc/demo:api                 # or the full id, anywhere a server
 servedev start web --on pc --dir '~/code/app' -- npm run dev   # a new server in a folder on pc
 servedev dirs '~/code' --on pc               # folders there, marking projects
 curl http://api.pc.localhost:7780            # each running server's port, forwarded here
+servedev profile create "Full stack" pc/demo:api web   # a profile of yours across machines
+servedev profile start "Full stack"          # each server on its machine, in order, each once the previous is ready
+servedev pin pc/demo:api                     # pinned on pc: starts whenever servedev starts there
 servedev remote ls                           # connected / reconnecting / offline, versions, forwards
 servedev remote reconnect pc                 # now, instead of waiting for the next retry
 servedev remote rm pc                        # forget it here (nothing changes on pc)
@@ -59,9 +62,25 @@ In the dashboard, **New server** gets a **Machine** picker once a machine is add
 
 **Versions.** Starting and inspecting work with any servedev on the machine. Browsing its folders needs the `/api/dirs` endpoint (servedev 0.3.0); an older one answers "pc runs servedev 0.2.0, which can't list its folders (type the path instead); update it", and typing the path still works. `remote ls` and the Machines sheet show when versions differ.
 
+## Profiles, grids and pins across machines
+
+Nothing is synced between machines; each profile belongs somewhere, and that decides what it can hold.
+
+**Your own profiles** (the hub's `~/.servedev/config.json`) can mix machines: `"servers": ["pc/demo:api", "web:web"]`. Starting one (`servedev profile start`, `start_profile`, the dashboard's **Start all**) goes through its servers **in order, on whichever machine each is on, each once the previous one is ready**: this machine's through its own manager, another machine's through that machine's servedev (`/api/start` with `wait`), so an API on the PC is up before the web app here that needs it. Servers already running are left as they are.
+
+- **A machine that isn't connected**: its servers are skipped, and the result says so (`– pc/demo:api skipped: pc is offline (…); start it again once pc is back`); the rest still start. The CLI doesn't count skipped servers as failures. In the dashboard they're listed as left out before you confirm.
+- **Refs are kept.** The hub checks a profile's `pc/…` refs against what that machine last reported. One it still has is a member (shown with its last known state while the machine is away). One that's gone from a connected machine, or that names a machine you don't have (anymore), is listed as not defined, and stays in the file: editing the profile never drops it, just like a server that's only on another branch. Removing a server through the hub (`servedev rm pc/demo:api`) takes it out of your profiles and grids, like removing a local one.
+- **Accounts resolve where a server runs.** A profile's account picks (`servedev profile accounts`) are for its servers on this machine: they name accounts signed in here, so they're never sent to another machine. A server on another machine started from your profile gets the accounts its own machine resolves for it (the profile there it last ran with, or the one profile there that picks accounts, else that machine's own), and the start result notes it when your profile picks accounts. To pick accounts for servers on the PC, use a profile on the PC (a shared one in its repo, or one of its own).
+
+**Grids.** The unsaved grid and your profiles' grids take any server, with a machine tag on another machine's tiles. **Save as profile** keeps every tile, other machines' included. A shared profile's grid holds its own repo's servers.
+
+**Profiles shared in repos on other machines.** A repo's `servedev.json` never mentions machines; its shared profiles belong to the repo, and each machine that has the repo starts its own servers with them. On a hub, those of each connected machine are listed too, under that machine (`pc/demo:Full stack`; `profile ls`, the switcher's "Shared in repos on pc", `list_profiles`). Everything done to one happens on its machine: starting it (in order, with that machine's accounts for the profile), editing it (its servers, order, description and skipped servers are written to the `servedev.json` there, and your changes to it are kept in that machine's config), its grid, deleting it. **Make a copy of your own** copies it into the hub's config with `pc/` ids and its layout, without its account picks. While the machine is away they show as last seen and can't be changed. Profiles that are another machine's own (in its `config.json`) aren't shown on the hub.
+
+**Pins.** Pinning a remote server (`servedev pin pc/demo:api`, `pin_server`, the server page's **Pin on pc**) pins it on that machine, in its own config: it starts whenever servedev starts there (its login item on a Mac, the boot task below on a Windows PC), whether or not the hub is around. The hub's own pins are only its own servers.
+
 ## Agents
 
-The MCP server's server tools take an optional `machine` (or a `pc/…` id as the name): `start_server`, `stop_server` (with `all`: everything running on that machine), `restart_server`, `remove_server`, `server_status`, `server_logs`, `search_logs`, `server_runs`, `list_servers` (each remote server has `machine`), `inspect_folder`, and `list_folders`. `start_server` with `machine` and `dir` creates a server in a folder there. `list_machines` shows each machine's state, system, version, server counts and forwarded ports; `reconnect_machine` retries one now and reports the checklist. `servedev instructions` (for CLAUDE.md / AGENTS.md) mentions all of this.
+The MCP server's server tools take an optional `machine` (or a `pc/…` id as the name): `start_server`, `stop_server` (with `all`: everything running on that machine), `restart_server`, `remove_server`, `server_status`, `server_logs`, `search_logs`, `server_runs`, `list_servers` (each remote server has `machine`), `inspect_folder`, and `list_folders`. `start_server` with `machine` and `dir` creates a server in a folder there. Profile and grid tools (`create_profile`, `update_profile`, `start_profile`, `start_servers` with a profile, `set_grid`, `update_grid`) take `pc/…` ids too. `list_machines` shows each machine's state, system, version, server counts and forwarded ports; `reconnect_machine` retries one now and reports the checklist. `servedev instructions` (for CLAUDE.md / AGENTS.md) mentions all of this.
 
 ## Windows PCs (servers in WSL)
 
@@ -88,7 +107,9 @@ Once a machine is added, the sidebar groups servers by machine: this one first, 
 
 **Machines** (next to Accounts) lists the machines: state, system, address, servedev version, servers and forwarded ports, with Reconnect now, Show only its servers, Copy SSH command, Start with Windows (the boot task below) and Remove. **Add machine** there runs the same checklist as `remote add`.
 
-A remote server's page says which machine it's on, where its address here leads (`→ pc:3000`, and the local port when that one was busy here), and pauses its actions while the machine isn't connected. Remote servers can go on the unsaved custom grid (with a small machine tag); profiles can't hold them yet.
+A remote server's page says which machine it's on, where its address here leads (`→ pc:3000`, and the local port when that one was busy here), and pauses its actions while the machine isn't connected. Remote servers can go on any custom grid of yours (with a small machine tag).
+
+The profile dialog lists servers by machine, then project; the switcher shows which machines each of your profiles uses (and when one of them is away), counts remote servers, and lists each machine's shared profiles under "Shared in repos on pc". With a profile selected, a project on another machine carries that machine's tag in the sidebar.
 
 ## API (for the dashboard and other clients)
 
@@ -102,9 +123,11 @@ All under the hub's token, like the rest of the API.
 | `POST /api/machines/reconnect` `{ name }` | `{ ok, steps, machine }` |
 | `POST /api/machines/remove` `{ name }` | `{ removed }` |
 | `POST /api/machines/boot` `{ name, install? }` | `{ supported, script, powershell, installed?, note? }` |
-| `GET /api/stream/events` | The snapshot has `machines`; remote servers arrive as `server` / `remove` events with `pc/` ids; `machine` (a MachineSummary) when a machine's state or forwards change; `machine-removed` `{ name }` |
+| `GET /api/stream/events` | The snapshot has `machines`; remote servers arrive as `server` / `remove` events with `pc/` ids; `machine` (a MachineSummary) when a machine's state or forwards change; `machine-removed` `{ name }`; `profiles` again when a machine's servers, shared profiles or state change what profiles show |
+| `GET /api/profiles` | Yours (members on another machine as `pc/` ids, with `unavailable`: the ones whose machine isn't connected) and this machine's shared ones, then each machine's shared ones (`machine`, `pc/` ids) |
+| `POST /api/profiles/start`, `POST /api/servers/start` `{ ids, profile }` | In order across machines; results may have `machine`, `skipped` (machine not connected) and `note` (e.g. which accounts a remote server used) |
 
-Every endpoint that takes a server id or name (start, stop, restart, remove, pin, hostname, wait, logs, runs, processes, the log streams, bulk start/stop, search) accepts `pc/<id>` or `pc/<name>` and is relayed. `POST /api/search` also takes `machine` to search every server on that machine.
+Every endpoint that takes a server id or name (start, stop, restart, remove, pin, hostname, wait, logs, runs, processes, the log streams, bulk start/stop, search) accepts `pc/<id>` or `pc/<name>` and is relayed. The profile endpoints (`/api/profiles`, `/update`, `/delete`, `/duplicate`, `/start`) take `pc/…` server refs for your profiles, and a profile shared on another machine by its `pc/` id (relayed there), as does `/api/layouts` (`scope: profile:pc/demo:Full stack`). A start relayed with `profile` sends it on only when it's a profile on that machine. `POST /api/search` also takes `machine` to search every server on that machine.
 
 | Endpoint | What |
 |---|---|
@@ -115,7 +138,9 @@ Every endpoint that takes a server id or name (start, stop, restart, remove, pin
 
 ## Limits
 
-- No state is synced: profiles (and their grids) and pins here can't include another machine's servers yet; the unsaved grid can. Pinning a remote server pins it on its machine.
+- No state is synced: your profiles live on the hub, a machine's own profiles and pins live on it. A machine's own (non-shared) profiles aren't shown on the hub.
+- Your profiles' account picks only apply to servers on the hub; pick accounts for another machine's servers with a profile there.
+- Each step of a profile start on another machine waits for that machine to report ready and for its port to be forwarded here (a couple of seconds on a WSL PC) before the next one starts.
 - Remote servers' own custom hostnames (set on that machine) aren't routed by the hub's proxy; their hub hostname is `<server>.<machine>.localhost`.
 - From the hub you can't track a folder on another machine without starting something (`servedev add` / Add project are local); the New server dialog still lists a folder's `servedev.json` servers there and starts them.
 - POSIX machines need a login shell that runs POSIX scripts (bash, zsh; not fish).

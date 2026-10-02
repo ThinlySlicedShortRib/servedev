@@ -54,7 +54,7 @@ Every server and profile remembers where it came from. The dashboard tags shared
 }
 ```
 
-- A shared profile can only list its own repo's servers.
+- A shared profile can only list its own repo's servers, never another machine's: each machine that has the repo starts its own with it.
 - `accounts` says what the servers need, like a project. Personal accounts (emails) belong in your config; servedev warns when it finds one here.
 - `grid` is the default layout. Everyone can rearrange it for themselves without changing the file.
 
@@ -76,8 +76,8 @@ Every server and profile remembers where it came from. The dashboard tags shared
   },
   "profiles": {
     "Review": {
-      "servers": ["my-app:api", "feat-login:web"],                 // across repos and worktrees
-      "accounts": { "gcloud": { "account": "me@example.com" } }
+      "servers": ["my-app:api", "feat-login:web", "pc/shop:db"],   // across repos, worktrees and machines
+      "accounts": { "gcloud": { "account": "me@example.com" } }   // for its servers on this machine
     }
   },
   "overrides": {
@@ -99,6 +99,7 @@ Every server and profile remembers where it came from. The dashboard tags shared
 
 - **Server ids** are `<project>:<name>`. The project name comes from `projects`, so local profiles keep working when a repo moves.
 - **Overrides** are keyed by the repo's git remote (or `folder:<name>` without one) plus the profile name, so your accounts, skipped servers and grid apply in every worktree of the repo.
+- **Your profiles and grids** can list another machine's servers by id (`pc/shop:db`); they start on that machine, in the profile's order. A ref to a machine or server that's gone stays in the file. A profile's `accounts` apply to its servers on this machine; another machine's servers use the accounts resolved there. See [remote.md](remote.md#profiles-grids-and-pins-across-machines).
 - **Machines** are other computers running servedev whose servers this one shows and controls over SSH; their ids get the machine's name in front (`pc/my-app:api`). Only `ssh` is needed (`user@host`, `ssh://user@host:port`, or a Host from `~/.ssh/config`); `kind` (`posix` or `wsl`) and `distro` are detected when it connects and kept so you can see and change them. The machine's API token is never stored here (Keychain on macOS, else `~/.servedev/machines/<name>.token`). Adding, removing or changing an entry by hand connects, disconnects or reconnects it. See [remote.md](remote.md).
 
 ## Worktrees

@@ -115,9 +115,11 @@ servedev ls --all                        # its servers too: pc/demo:api
 servedev logs api --on pc -f             # --on <machine>, or pc/<name> anywhere a name goes
 curl http://api.pc.localhost:7780        # its ports, forwarded here
 servedev start web --on pc --dir '~/code/app' -- npm run dev   # a new server there, defined on pc
+servedev profile create "Full stack" pc/demo:api web            # your profiles can mix machines
+servedev profile start "Full stack"      # pc's api first (on pc), then web here, each once the previous is ready
 ```
 
-This servedev becomes a hub: it keeps one SSH connection per machine and talks to that machine's own servedev through it, forwarding the ports its servers listen on. Machines show as connected, reconnecting or offline (with their last known servers). New servers can be created on a machine from the CLI, the dashboard's New server dialog (pick the machine, browse its folders) or agents (`start_server` with `machine` and `dir`). See [docs/remote.md](docs/remote.md), including starting servedev when a Windows PC boots.
+This servedev becomes a hub: it keeps one SSH connection per machine and talks to that machine's own servedev through it, forwarding the ports its servers listen on. Machines show as connected, reconnecting or offline (with their last known servers). New servers can be created on a machine from the CLI, the dashboard's New server dialog (pick the machine, browse its folders) or agents (`start_server` with `machine` and `dir`). Your own profiles and grids can hold servers from any machine; profiles shared in a repo on another machine show up too and start that machine's servers. See [docs/remote.md](docs/remote.md), including starting servedev when a Windows PC boots.
 
 ### servedev.json (optional)
 
