@@ -39,6 +39,53 @@ export interface Server {
   vars?: { name: string; preview: string; secret: boolean }[]
   /** Where it's defined: the repo's servedev.json, your config.json, or both (your changes on top). */
   source?: { repo: boolean; local: boolean }
+  /** On another machine (its id is "<machine>/<id there>"); `url` is then its port forwarded here. */
+  machine?: string
+  /** Its id on that machine. */
+  remoteId?: string
+  machineState?: MachineState
+  /** Its machine isn't connected: this is the last known state (show it dimmed). */
+  stale?: boolean
+  /** Its URL on its own machine. */
+  remoteUrl?: string
+  /** Hostname here, e.g. api.pc.localhost (customUrl is its URL through the proxy). */
+  localHostname?: string
+  forwards?: { remotePort: number; localPort: number }[]
+}
+
+export type MachineState = "connecting" | "connected" | "reconnecting" | "offline"
+
+/** One line of the "Add machine" checklist (POST /api/machines/add, /reconnect). */
+export interface SetupStep {
+  id: "ssh" | "os" | "servedev" | "token" | "api"
+  label: string
+  status: "ok" | "warning" | "failed" | "skipped"
+  detail?: string
+  hint?: string
+}
+
+/** Another machine whose servers this servedev relays (GET /api/machines; "machine" events). */
+export interface Machine {
+  name: string
+  ssh: string
+  kind?: "posix" | "wsl"
+  distro?: string
+  os?: string
+  state: MachineState
+  attempt: number
+  nextRetryAt?: number
+  lastError?: string
+  hint?: string
+  connectedAt?: number
+  lastSeen?: number
+  version?: string
+  hubVersion: string
+  versionMismatch: boolean
+  remotePort?: number
+  apiPort?: number
+  counts: { total: number; running: number; crashed: number }
+  forwards: { remotePort: number; localPort: number; target: string; serverIds: string[] }[]
+  steps?: SetupStep[]
 }
 
 /** A problem in a config file (servedev keeps using the last version that parsed). */

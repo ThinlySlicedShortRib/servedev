@@ -76,6 +76,7 @@ test("ssh failures come with a fix", () => {
   expect(explainSshError("ariel@1.2.3.4: Permission denied (publickey).", "ariel@1.2.3.4").hint).toContain("authorized_keys");
   expect(explainSshError("ssh: connect to host 1.2.3.4 port 22: Connection timed out", "ssh://a@1.2.3.4:2").hint).toContain("is 1.2.3.4 on");
   expect(explainSshError("Host key verification failed.", "pc").hint).toContain("ssh pc");
+  expect(explainSshError("ssh: Could not resolve hostname 1.2.3.4:22: Name or service not known", "a@1.2.3.4:22").hint).toContain("ssh://a@1.2.3.4:22");
   expect(explainSshError("weird", "pc").hint).toBeUndefined();
 });
 
@@ -229,6 +230,20 @@ test("connecting to a Windows PC: WSL detected, servedev found, token saved, API
   await Bun.sleep(50);
   expect(ssh.forwards.has("127.0.0.1:3000:127.0.0.1:3000")).toBe(true);
   expect(m.forwards.get(3000)).toEqual({ localPort: 3000, target: "127.0.0.1" });
+});
+
+test("a different servedev version on the machine is reported, with both versions", async () => {
+  const remote = fakeRemote();
+  const ssh = fakeSsh({ servedev: "ok" });
+  const reserved = new Set<number>();
+  const m = new Machine("mac", { ssh: "me@mac" }, { dir: tmp(), secrets: memorySecrets(), hubVersion: "0.3.0", reserved, spawner: ssh.spawner, ports: fakePorts(remote.port, reserved) });
+  cleanups.push(() => m.dispose());
+  const steps = await m.connect();
+  const step = steps.find((s) => s.id === "servedev")!;
+  expect(step.status).toBe("warning");
+  expect(step.detail).toBe("0.2.0 running on port 7777 (/home/me/.local/bin/servedev); this hub runs 0.3.0");
+  expect(step.hint).toContain("versions differ");
+  expect(m.status.state).toBe("connected");
 });
 
 test("missing servedev fails the checklist with a fix; nothing after it runs", async () => {

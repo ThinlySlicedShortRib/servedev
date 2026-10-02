@@ -103,7 +103,10 @@ export function explainSshError(stderr: string, target: string): { message: stri
     };
   }
   if (/host key verification failed/i.test(stderr)) return { message: text, hint: `connect once by hand to accept its host key: ssh ${target}` };
-  if (/could not resolve|name or service not known|nodename nor servname/i.test(stderr)) return { message: text, hint: `${host} doesn't resolve; check the address (Tailscale: tailscale status)` };
+  if (/could not resolve|name or service not known|nodename nor servname/i.test(stderr)) {
+    if (/^[^/]*@[^:]+:\d+$/.test(target)) return { message: text, hint: `for another port, use ssh://${target} (or a Host entry in ~/.ssh/config)` };
+    return { message: text, hint: `${host} doesn't resolve; check the address (Tailscale: tailscale status)` };
+  }
   if (/timed out|no route to host|network is unreachable|connection refused/i.test(stderr)) {
     return { message: text, hint: `is ${host} on, awake and reachable (Tailscale running on both), with an SSH server listening?` };
   }

@@ -1627,7 +1627,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     const { local, remote } = hub.partition(req.servers ?? []);
     const machines = new Map(remote);
     if (req.all && !req.servers?.length) for (const m of hub.machines.values()) if (m.connected) machines.set(m, []);
-    const searchHere = !req.servers?.length || local.length > 0;
+    // `all` on a hub with no servers of its own searches just the machines.
+    const searchHere = req.servers?.length ? local.length > 0 : !(req.all && machines.size && !manager.list().length);
     const mine = searchHere ? search({ ...req, servers: req.servers?.length ? local.map(String) : undefined }) : undefined;
     const theirs = await Promise.all(
       [...machines].map(async ([m, ids]) =>
