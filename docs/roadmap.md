@@ -34,6 +34,7 @@ Ideas to look into before deciding.
 
 ## Done
 
+- 2026-10-04: Dashboard at http://servedev.localhost (the `dashboard_hostname` setting picks another name).
 - 2026-10-02: Dev mode (`bun run dev`): sandboxed daemon from source with `--watch`, dashboard on Vite with hot reload.
 - 2026-10-02: Edit a server's command and setup step from the dashboard and the `edit_server` MCP tool (masked secrets are kept).
 - 2026-10-02: Another machine's dev servers started outside servedev get their ports forwarded too; forwards keep the same port number when the server listens only on `::1`.

@@ -488,8 +488,9 @@ async function main() {
     case "ui":
     case "dashboard": {
       await ensureDaemon();
-      console.log(`servedev dashboard: ${DAEMON_URL}`);
-      if (!o["no-open"]) Bun.spawn(["open", DAEMON_URL], { stdout: "ignore", stderr: "ignore" });
+      const url = (await daemonStatus())?.dashboard ?? DAEMON_URL;
+      console.log(`servedev dashboard: ${url}`);
+      if (!o["no-open"]) Bun.spawn(["open", url], { stdout: "ignore", stderr: "ignore" });
       return;
     }
     case "mcp":

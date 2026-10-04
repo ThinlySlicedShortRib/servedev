@@ -38,7 +38,7 @@ servedev logs web --run 12              # an earlier run's log
 servedev config log_retention_days 14   # keep logs longer (default 7)
 servedev restart web
 servedev down                           # stop everything in this project
-servedev ui                             # open the dashboard (http://127.0.0.1:7777)
+servedev ui                             # open the dashboard (http://servedev.localhost)
 ```
 
 Readiness defaults to "the process group is listening on a TCP port". Alternatives: `--ready-log <regex>`, `--ready-url /health`, `--ready none`. `--port auto|N` exports `$PORT` and fills `{port}` in the command; for detected Vite/Next/Astro/etc. scripts it also passes `--port`.
@@ -184,7 +184,7 @@ MCP tools cover everything the dashboard can do, so you can ask an agent to "mak
 
 ## How it works
 
-`servedev` auto-starts a small daemon (`127.0.0.1:7777`) that owns the processes. The CLI, the MCP server and the dashboard are all clients of its HTTP API. Each server runs as `sh -c <command>` in its own process group, with stdout/stderr going straight to a log file, so servers keep running if the daemon stops and a new daemon adopts them.
+`servedev` auto-starts a small daemon (`127.0.0.1:7777`) that owns the processes. The CLI, the MCP server and the dashboard are all clients of its HTTP API. Each server runs as `sh -c <command>` in its own process group, with stdout/stderr going straight to a log file, so servers keep running if the daemon stops and a new daemon adopts them. The dashboard is at http://servedev.localhost, through the hostname proxy (and always at `127.0.0.1:7777`); the `dashboard_hostname` setting changes the name, e.g. to a domain of yours that points at 127.0.0.1.
 
 Some tools start work in process groups of their own: turbo, for one, runs every task in a new group. servedev follows the server's process tree and adopts any group a descendant creates, so it finds ports opened there, and stop/restart signal every group (otherwise `next dev` under turbo would be left running on its port). The groups are saved with each run; `servedev status` and the dashboard's **Processes** tab show them.
 

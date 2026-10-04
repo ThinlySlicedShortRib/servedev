@@ -34,8 +34,15 @@ export const SETTINGS = {
     default: 80,
     describe: "Port for custom hostnames like keel.localhost. 80 gives URLs without a port; falls back to 7780 when 80 is taken.",
   },
+  dashboard_hostname: {
+    default: "servedev.localhost",
+    describe:
+      "Hostname for the dashboard, served by the hostname proxy (http://servedev.localhost). A name outside .localhost needs to point at 127.0.0.1 (DNS or /etc/hosts).",
+  },
 } as const;
 export type SettingKey = keyof typeof SETTINGS;
+/** A setting's type: number or string, after its default. */
+export type SettingValue<K extends SettingKey> = (typeof SETTINGS)[K]["default"] extends number ? number : string;
 
 /** A local profile: any servers, from any project or worktree, on this machine or another one. */
 export interface LocalProfileConfig {
@@ -69,7 +76,7 @@ export interface ProjectEntry {
 export interface LocalConfig {
   $schema?: string;
   version?: number;
-  settings?: Partial<Record<SettingKey, number>>;
+  settings?: Partial<Record<SettingKey, number | string>>;
   /** Project name -> where it is. Names prefix server ids ("capcon-apps:api"). */
   projects?: Record<string, ProjectEntry>;
   /** Project -> server name -> a server of your own, or your changes to one from servedev.json. */
@@ -183,9 +190,11 @@ export class ConfigStore extends EventEmitter {
     return [...this.repoDocs.values()].find((d) => d.file === file)?.hash ?? "";
   }
 
-  setting(key: SettingKey): number {
+  setting<K extends SettingKey>(key: K): SettingValue<K> {
     const v = this.local.settings?.[key];
-    return typeof v === "number" && Number.isFinite(v) ? v : SETTINGS[key].default;
+    const d = SETTINGS[key].default;
+    const ok = typeof d === "number" ? typeof v === "number" && Number.isFinite(v) : typeof v === "string" && v !== "";
+    return (ok ? v : d) as SettingValue<K>;
   }
 
   /** Folders of known projects. */

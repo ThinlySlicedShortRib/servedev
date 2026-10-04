@@ -558,6 +558,7 @@ export const TOOLS = [
     inputSchema: obj({
       log_retention_days: { type: "number", description: "Delete logs of runs that stopped more than this many days ago (default 7)." },
       proxy_port: { type: "number", description: "Port for custom hostnames (default 80, falls back to 7780)." },
+      dashboard_hostname: { type: "string", description: 'Hostname for the dashboard (default "servedev.localhost").' },
       autostart: { type: "boolean", description: "Start the daemon and pinned servers at login (macOS)." },
     }),
   },
@@ -722,8 +723,9 @@ export async function callTool(name: string, a: Args): Promise<OpResult> {
       const out: string[] = [];
       if (a.log_retention_days !== undefined) out.push((await opConfig({ key: "log_retention_days", value: String(a.log_retention_days) })).text);
       if (a.proxy_port !== undefined) out.push((await opConfig({ key: "proxy_port", value: String(a.proxy_port) })).text);
+      if (a.dashboard_hostname !== undefined) out.push((await opConfig({ key: "dashboard_hostname", value: String(a.dashboard_hostname) })).text);
       if (a.autostart !== undefined) out.push(`autostart: ${(await opAutostart(a.autostart)).text}`);
-      if (!out.length) throw new Error("nothing to change: pass log_retention_days, proxy_port or autostart");
+      if (!out.length) throw new Error("nothing to change: pass log_retention_days, proxy_port, dashboard_hostname or autostart");
       return { ok: true, text: out.join("\n") };
     }
     default:

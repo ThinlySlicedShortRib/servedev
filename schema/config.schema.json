@@ -27,6 +27,11 @@
           "maximum": 65535,
           "default": 80,
           "description": "Port for custom hostnames like keel.localhost."
+        },
+        "dashboard_hostname": {
+          "type": "string",
+          "default": "servedev.localhost",
+          "description": "Hostname for the dashboard, served by the hostname proxy. A name outside .localhost needs to point at 127.0.0.1 (DNS or /etc/hosts)."
         }
       }
     },

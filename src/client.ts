@@ -18,10 +18,10 @@ export function selfCommand(): string[] {
   return compiled ? [process.execPath] : [process.execPath, script];
 }
 
-async function health(): Promise<{ version: string; pid: number } | undefined> {
+async function health(): Promise<{ version: string; pid: number; dashboard?: string } | undefined> {
   try {
     const res = await fetch(`${DAEMON_URL}/api/health`, { signal: AbortSignal.timeout(1000) });
-    return res.ok ? ((await res.json()) as { version: string; pid: number }) : undefined;
+    return res.ok ? ((await res.json()) as { version: string; pid: number; dashboard?: string }) : undefined;
   } catch {
     return undefined;
   }

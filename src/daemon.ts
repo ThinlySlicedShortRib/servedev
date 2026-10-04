@@ -361,6 +361,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   // Custom hostnames (keel.localhost) -> each server's current port.
   // Remote machines' servers get <server>.<machine>.localhost, routed to their forwarded port.
   const proxy = new HostProxy((host): Route => {
+    if (host === config.setting("dashboard_hostname")) return { status: "ok", port: DAEMON_PORT, serverId: "servedev" };
     const s = manager.list().find((x) => x.hostname === host);
     const remote = s ? undefined : hub.route(host);
     if (remote) return remote;
@@ -370,10 +371,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     return { status: "ok", port, serverId: s.id };
   });
 
-  /** Run the proxy only while some server has a hostname. */
+  /** Run the proxy; it always serves the dashboard's hostname (servedev.localhost). */
   function syncProxy(restart = false) {
-    // Remote servers' hostnames keep it up even while their machine reconnects (they answer "not running").
-    const wanted = manager.list().some((s) => s.hostname) || hub.hostnames().length > 0;
+    const wanted = true;
     const was = proxy.running;
     if (restart || !wanted) proxy.stop();
     if (wanted && !proxy.running) {
@@ -500,6 +500,17 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   manager.startMonitor();
 
   const allowedHosts = new Set([`127.0.0.1:${DAEMON_PORT}`, `localhost:${DAEMON_PORT}`]);
+  /** Our own address, or the dashboard's hostname through the proxy (which keeps the browser's Host). */
+  function ownHost(host: string): boolean {
+    if (allowedHosts.has(host)) return true;
+    const name = config.setting("dashboard_hostname");
+    return host === name || (!!proxy.port && host === `${name}:${proxy.port}`);
+  }
+  /** Where the dashboard is: its hostname when the proxy runs, else the daemon's own address. */
+  function dashboardUrl(): string {
+    if (!proxy.running || !proxy.port) return `http://127.0.0.1:${DAEMON_PORT}`;
+    return proxy.urlFor(config.setting("dashboard_hostname")) ?? `http://127.0.0.1:${DAEMON_PORT}`;
+  }
 
   function defaultName(root: string): string {
     const here = [...resolved.servers.values()].filter((d) => d.root === root).map((d) => d.name);
@@ -614,6 +625,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       const hostname = normalizeHostname(req.hostname);
       const taken = [...resolved.servers.values()].find((o) => o.hostname === hostname && o.id !== id);
       if (taken) throw new HttpError(409, `${hostname} is already used by ${taken.id}`);
+      if (hostname === config.setting("dashboard_hostname")) throw new HttpError(409, `${hostname} is the servedev dashboard's (the dashboard_hostname setting)`);
       patch.hostname = hostname;
     }
     let portSpec = req.port ?? def?.portSpec;
@@ -1856,7 +1868,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     const q = url.searchParams;
     const body = req.method === "POST" ? ((await req.json().catch(() => ({}))) as Record<string, any>) : {};
 
-    if (p === "/api/health") return { ok: true, version: VERSION, pid: process.pid };
+    if (p === "/api/health") return { ok: true, version: VERSION, pid: process.pid, dashboard: dashboardUrl() };
     const relayed = await relay(req, p, q, body);
     if (relayed !== undefined) return relayed;
     if (p === "/api/machines" && req.method === "GET") return { machines: hub.summaries(), hubVersion: VERSION };
@@ -1895,6 +1907,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       const hostname = body.hostname ? normalizeHostname(String(body.hostname)) : undefined;
       const owner = hostname && [...resolved.servers.values()].find((o) => o.hostname === hostname && o.id !== s.id);
       if (owner) throw new HttpError(409, `${hostname} is already used by ${owner.id}`);
+      if (hostname && hostname === config.setting("dashboard_hostname")) throw new HttpError(409, `${hostname} is the servedev dashboard's (the dashboard_hostname setting)`);
       configCall(() => writeServer(s.project, s.root, s.name, { hostname: hostname ?? null }));
       reconcile();
       const resolvesLocally = !hostname || hostname.endsWith(".localhost");
@@ -2258,9 +2271,14 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       if (req.method === "POST") {
         const key = body.key as SettingKey;
         if (!(key in SETTINGS)) throw new HttpError(400, `unknown setting "${key}" (have: ${Object.keys(SETTINGS).join(", ")})`);
-        const value = Number(body.value);
+        let value: number | string = Number(body.value);
         if (key === "log_retention_days" && !(value >= 1)) throw new HttpError(400, "log_retention_days must be a number of days, at least 1");
         if (key === "proxy_port" && !(Number.isInteger(value) && value > 0 && value < 65536)) throw new HttpError(400, "proxy_port must be a port number");
+        if (key === "dashboard_hostname") {
+          value = normalizeHostname(String(body.value ?? ""));
+          const owner = [...resolved.servers.values()].find((o) => o.hostname === value);
+          if (owner) throw new HttpError(409, `${value} is already used by ${owner.id}`);
+        }
         configCall(() => config.editLocal((c) => void ((c.settings ??= {})[key] = value)));
         reconcile();
         if (key === "log_retention_days") manager.purgeOldLogs();
@@ -2404,9 +2422,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     async fetch(req) {
       const url = new URL(req.url);
       // DNS-rebinding and cross-site protection: only our own host/origin, and a token for the API.
-      if (!allowedHosts.has(req.headers.get("host") ?? "")) return new Response("forbidden host", { status: 403 });
+      if (!ownHost(req.headers.get("host") ?? "")) return new Response("forbidden host", { status: 403 });
       const origin = req.headers.get("origin");
-      if (origin && !allowedHosts.has(origin.replace(/^https?:\/\//, ""))) return new Response("forbidden origin", { status: 403 });
+      if (origin && !ownHost(origin.replace(/^https?:\/\//, ""))) return new Response("forbidden origin", { status: 403 });
 
       if (url.pathname === "/" || url.pathname === "/index.html") {
         return new Response(uiHtml.replace("{{SERVEDEV_TOKEN}}", token).replace("{{SERVEDEV_BUILD}}", UI_BUILD), {
