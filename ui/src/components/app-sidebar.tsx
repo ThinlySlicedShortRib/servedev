@@ -34,6 +34,7 @@ import { ACTIVE, ago, openUrl, portOf, statusLabel, type Machine, type Server } 
 import { SERVER_MIME } from "@/lib/drag"
 import { BranchTag } from "@/components/branch-tag"
 import { Hint, TruncatedText } from "@/components/hint"
+import { type SidebarFilter } from "@/hooks/use-sidebar-filter"
 import { branchOf, filterGroups, statusGroup, type Entry, type StatusFilter } from "@/lib/entries"
 import { MachineHeader, MachineRailMarker, MachineTag } from "@/components/machine-ui"
 import { useMachineFolds, useMachines } from "@/hooks/use-machines"
@@ -45,7 +46,6 @@ const FILTERS: { value: StatusFilter; label: string; hint: string }[] = [
   { value: "stopped", label: "Stopped", hint: "Show only servers that were stopped or exited on their own" },
   { value: "crashed", label: "Crashed", hint: "Show only servers that crashed (exited with an error)" },
 ]
-const FILTER_KEY = "servedev:status-filter"
 /** Group key for the pinned section; can't collide with a project name. */
 const PINNED = "\u0000pinned"
 
@@ -56,16 +56,6 @@ function countPinned(c: { total: number; running: number; crashed: number }, pin
     running: c.running + pinned.filter((e) => statusGroup(e) === "running").length,
     crashed: c.crashed + pinned.filter((e) => e.status === "crashed").length,
   }
-}
-
-function loadFilter(): StatusFilter {
-  try {
-    const v = localStorage.getItem(FILTER_KEY)
-    if (FILTERS.some((f) => f.value === v)) return v as StatusFilter
-  } catch {
-    // storage unavailable
-  }
-  return "all"
 }
 
 export function AppSidebar({
@@ -80,6 +70,7 @@ export function AppSidebar({
   grid,
   onRemoveProject,
   byMachine = false,
+  filter,
 }: {
   groups: [string, Entry[]][]
   /** Pinned servers, shown above the projects. */
@@ -99,11 +90,12 @@ export function AppSidebar({
   byMachine?: boolean
   /** Remove a tracked folder: all of its servers. Given the project's tracked servers. */
   onRemoveProject: (project: string, entries: Entry[]) => void
+  /** Search and status filter (owned by the app, which starts new profiles from what's listed). */
+  filter: SidebarFilter
 }) {
   const { setOpenMobile, state: sidebarState, setOpen } = useSidebar()
   const collapsed = sidebarState === "collapsed"
-  const [query, setQuery] = React.useState("")
-  const [status, setStatus] = React.useState<StatusFilter>(loadFilter)
+  const { query, setQuery, status } = filter
   const searchRef = React.useRef<HTMLInputElement>(null)
   const styleId = useStyleId()
   const terminal = styleId === "terminal"
@@ -121,7 +113,7 @@ export function AppSidebar({
     () => filterGroups(pinned.length ? [[PINNED, pinned], ...groups] : groups, query, status),
     [groups, pinned, query, status]
   )
-  const filtering = query.trim() !== "" || status !== "all"
+  const filtering = filter.active
 
   // With other machines, each machine is a section (This Mac first) with its own projects.
   const machines = useMachines()
@@ -143,14 +135,7 @@ export function AppSidebar({
     setTimeout(() => searchRef.current?.focus(), 220)
   }
 
-  function changeStatus(next: StatusFilter) {
-    setStatus(next)
-    try {
-      localStorage.setItem(FILTER_KEY, next)
-    } catch {
-      // storage unavailable
-    }
-  }
+  const changeStatus = filter.setStatus
 
   // "/" focuses search from anywhere outside a text field.
   React.useEffect(() => {

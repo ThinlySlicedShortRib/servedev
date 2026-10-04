@@ -45,7 +45,8 @@ import { MachinesSheet } from "@/components/machines-sheet"
 import { toast } from "sonner"
 
 import { ACTIVE, CLIENT_ID, api, openUrl, type Profile } from "@/lib/api"
-import { groupEntries, viewEntries, type Entry } from "@/lib/entries"
+import { filterGroups, groupEntries, viewEntries, type Entry } from "@/lib/entries"
+import { useSidebarFilter } from "@/hooks/use-sidebar-filter"
 
 const PROFILE_KEY = "servedev:profile"
 const VIEW_KEY = "servedev:view"
@@ -103,6 +104,11 @@ export function App() {
   const listProfile = view === "grid" ? undefined : activeProfile
   const { pinned, groups } = React.useMemo(() => viewEntries(allGroups, listProfile), [allGroups, listProfile])
   const entries = [...pinned, ...groups.flatMap(([, es]) => es)]
+  const filter = useSidebarFilter()
+  // While the sidebar is filtered, a new profile starts with exactly the servers it lists.
+  const listedIds = filter.active
+    ? filterGroups([["", entries]], filter.query, filter.status).flatMap(([, es]) => es.flatMap((e) => (e.server ? [e.server.id] : [])))
+    : undefined
   const grid = useCustomGrid(activeProfile, layoutChange)
   // Start all / Stop all: the selected profile (in its start order), or with no profile every
   // server servedev tracks, in either view. (Without a profile the sidebar lists all servers.)
@@ -235,6 +241,7 @@ export function App() {
       <AppSidebar
         groups={groups}
         pinned={pinned}
+        filter={filter}
         profileControls={
           <>
             <ProfileSwitcher
@@ -438,6 +445,7 @@ export function App() {
         onOpenChange={(o) => !o && setEditing(null)}
         profile={editing?.profile}
         servers={servers}
+        preset={listedIds}
         onSaved={(p) => switchProfile(p.id)}
       />
       <AlertDialog open={removingProject !== null} onOpenChange={(o) => !o && setRemovingProject(null)}>

@@ -39,12 +39,15 @@ export function ProfileDialog({
   onOpenChange,
   profile,
   servers,
+  preset,
   onSaved,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   profile?: Profile
   servers: Map<string, Server>
+  /** Servers a new profile starts with (the sidebar's filtered list); without it, what's running. */
+  preset?: string[]
   onSaved: (p: Profile) => void
 }) {
   const shared = profile?.kind === "shared"
@@ -64,8 +67,13 @@ export function ProfileDialog({
     if (!open) return
     setName(profile?.name ?? "")
     setDescription(profile?.description ?? "")
-    // A new profile starts from whatever is running now, here and on connected machines.
-    setMembers(profile ? profile.members : [...servers.values()].filter((s) => ACTIVE.includes(s.status) && !s.stale).map((s) => s.id))
+    // A new profile starts from the servers the sidebar lists while it's filtered, else from whatever
+    // is running now, here and on connected machines.
+    setMembers(
+      profile
+        ? profile.members
+        : (preset?.filter((id) => servers.has(id)) ?? [...servers.values()].filter((s) => ACTIVE.includes(s.status) && !s.stale).map((s) => s.id))
+    )
     setSkipped(profile?.skipped ?? [])
     setAccounts((profile?.kind === "shared" ? profile.mine : profile?.accounts) ?? {})
     setNeeds(profile?.needs ?? {})
@@ -184,7 +192,8 @@ export function ProfileDialog({
                 accounts stay in your config{there ? ` there` : ""}.
               </>
             ) : (
-              `A profile is a set of servers you work on together, from any project${machines.hasRemotes ? " and any machine" : ""}. Switching to it shows just those servers; starting it leaves everything else running.`
+              `A profile is a set of servers you work on together, from any project${machines.hasRemotes ? " and any machine" : ""}. Switching to it shows just those servers; starting it leaves everything else running.` +
+              (!profile && preset ? " It starts with the servers the sidebar lists right now." : "")
             )}
           </DialogDescription>
         </DialogHeader>
