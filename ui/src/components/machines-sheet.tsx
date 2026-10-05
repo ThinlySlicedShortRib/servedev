@@ -375,24 +375,25 @@ const STEPS: { id: SetupStep["id"]; label: string }[] = [
 type Result = { ok: boolean; steps: SetupStep[]; machine?: Machine }
 
 export function AddMachineDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        {/* Mounted only while open, so each opening starts with an empty form. */}
+        <AddMachineForm onDone={() => onOpenChange(false)} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AddMachineForm({ onDone }: { onDone: () => void }) {
   const machines = useMachines()
   const [ssh, setSsh] = React.useState("")
   const [name, setName] = React.useState("")
   const [phase, setPhase] = React.useState<"form" | "running" | "done">("form")
   const [result, setResult] = React.useState<Result | null>(null)
   const [error, setError] = React.useState<string | null>(null)
-  // Ignore an answer that comes back after the dialog was closed or restarted.
+  // Ignore an answer that comes back after a retry started.
   const run = React.useRef(0)
-
-  React.useEffect(() => {
-    if (!open) return
-    run.current++
-    setSsh("")
-    setName("")
-    setPhase("form")
-    setResult(null)
-    setError(null)
-  }, [open])
 
   const finalName = name.trim() || suggestMachineName(ssh)
   const nameError = !finalName
@@ -426,129 +427,127 @@ export function AddMachineDialog({ open, onOpenChange }: { open: boolean; onOpen
   const failed = phase === "done" && !ok
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Add machine</DialogTitle>
-          <DialogDescription>
-            Connect to servedev on another computer over SSH. Its servers appear in the sidebar, and you start, stop and open them from here.
-          </DialogDescription>
-        </DialogHeader>
-        {phase === "form" ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              void connect()
-            }}
-            className="flex flex-col gap-6"
-          >
-            <FieldGroup>
-              <Field data-invalid={!!sshError || undefined}>
-                <FieldLabel htmlFor="am-ssh">SSH address</FieldLabel>
-                <Input
-                  id="am-ssh"
-                  value={ssh}
-                  onChange={(e) => setSsh(e.target.value)}
-                  placeholder="you@100.64.0.2, or a Host from ~/.ssh/config"
-                  className="font-mono"
-                  autoFocus
-                  spellCheck={false}
-                  autoComplete="off"
-                  aria-invalid={!!sshError || undefined}
-                />
-                {sshError ? (
-                  <FieldError>{sshError}</FieldError>
-                ) : (
-                  <FieldDescription>
-                    Anything <span className="font-mono">ssh</span> accepts. servedev uses your SSH keys (it must connect without a password) and stores no
-                    password. For a Windows PC, its OpenSSH server; servers run in WSL.
-                  </FieldDescription>
-                )}
-              </Field>
-              <Field data-invalid={!!nameError || undefined}>
-                <FieldLabel htmlFor="am-name">Name</FieldLabel>
-                <Input
-                  id="am-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value.toLowerCase())}
-                  placeholder={suggestMachineName(ssh) || "pc"}
-                  className="font-mono"
-                  spellCheck={false}
-                  autoComplete="off"
-                  aria-invalid={!!nameError || undefined}
-                />
-                {nameError ? (
-                  <FieldError>{nameError}</FieldError>
-                ) : (
-                  <FieldDescription>
-                    Shown in the sidebar and in its servers' addresses here: <span className="font-mono">api.{finalName || "pc"}.localhost</span>
-                  </FieldDescription>
-                )}
-              </Field>
-            </FieldGroup>
-            <DialogFooter>
-              <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-              <Button type="submit" disabled={!canConnect}>
-                Connect
-              </Button>
-            </DialogFooter>
-          </form>
-        ) : (
-          <div className="flex flex-col gap-5">
-            <ol className="flex flex-col gap-2.5" aria-live="polite" aria-busy={phase === "running"}>
-              {STEPS.map((def) => (
-                <StepRow key={def.id} label={def.label} step={result?.steps.find((s) => s.id === def.id)} />
-              ))}
-            </ol>
-            {phase === "running" && (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-                <Spinner className="size-4" />
-                Connecting to <span className="font-mono">{ssh.trim()}</span> and checking each step…
-              </p>
+    <>
+    <DialogHeader>
+      <DialogTitle>Add machine</DialogTitle>
+      <DialogDescription>
+        Connect to servedev on another computer over SSH. Its servers appear in the sidebar, and you start, stop and open them from here.
+      </DialogDescription>
+    </DialogHeader>
+    {phase === "form" ? (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          void connect()
+        }}
+        className="flex flex-col gap-6"
+      >
+        <FieldGroup>
+          <Field data-invalid={!!sshError || undefined}>
+            <FieldLabel htmlFor="am-ssh">SSH address</FieldLabel>
+            <Input
+              id="am-ssh"
+              value={ssh}
+              onChange={(e) => setSsh(e.target.value)}
+              placeholder="you@100.64.0.2, or a Host from ~/.ssh/config"
+              className="font-mono"
+              autoFocus
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={!!sshError || undefined}
+            />
+            {sshError ? (
+              <FieldError>{sshError}</FieldError>
+            ) : (
+              <FieldDescription>
+                Anything <span className="font-mono">ssh</span> accepts. servedev uses your SSH keys (it must connect without a password) and stores no
+                password. For a Windows PC, its OpenSSH server; servers run in WSL.
+              </FieldDescription>
             )}
-            {error && (
-              <p className={cn("p-3 text-sm text-destructive", box)} role="alert">
-                {error}
-              </p>
+          </Field>
+          <Field data-invalid={!!nameError || undefined}>
+            <FieldLabel htmlFor="am-name">Name</FieldLabel>
+            <Input
+              id="am-name"
+              value={name}
+              onChange={(e) => setName(e.target.value.toLowerCase())}
+              placeholder={suggestMachineName(ssh) || "pc"}
+              className="font-mono"
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={!!nameError || undefined}
+            />
+            {nameError ? (
+              <FieldError>{nameError}</FieldError>
+            ) : (
+              <FieldDescription>
+                Shown in the sidebar and in its servers' addresses here: <span className="font-mono">api.{finalName || "pc"}.localhost</span>
+              </FieldDescription>
             )}
-            {ok && (
-              <p className="text-sm" role="status">
-                <span className="font-medium">{finalName} is connected.</span>{" "}
-                <span className="text-muted-foreground">
-                  {result?.machine?.counts.total
-                    ? `Its ${result.machine.counts.total} ${result.machine.counts.total === 1 ? "server is" : "servers are"} in the sidebar under ${finalName}.`
-                    : `Its servers show up in the sidebar under ${finalName}.`}
-                </span>
-              </p>
-            )}
-            <DialogFooter>
-              {failed ? (
-                <>
-                  <Button variant="outline" onClick={() => setPhase("form")}>
-                    Back
-                  </Button>
-                  <Button onClick={() => void connect()}>
-                    <RefreshCwIcon data-icon="inline-start" />
-                    Try again
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {phase === "running" && (
-                    <Hint label="Closes this window; servedev finishes checking in the background">
-                      <DialogClose render={<Button variant="outline" />}>Close</DialogClose>
-                    </Hint>
-                  )}
-                  <Button disabled={!ok} onClick={() => onOpenChange(false)}>
-                    Done
-                  </Button>
-                </>
-              )}
-            </DialogFooter>
-          </div>
+          </Field>
+        </FieldGroup>
+        <DialogFooter>
+          <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+          <Button type="submit" disabled={!canConnect}>
+            Connect
+          </Button>
+        </DialogFooter>
+      </form>
+    ) : (
+      <div className="flex flex-col gap-5">
+        <ol className="flex flex-col gap-2.5" aria-live="polite" aria-busy={phase === "running"}>
+          {STEPS.map((def) => (
+            <StepRow key={def.id} label={def.label} step={result?.steps.find((s) => s.id === def.id)} />
+          ))}
+        </ol>
+        {phase === "running" && (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+            <Spinner className="size-4" />
+            Connecting to <span className="font-mono">{ssh.trim()}</span> and checking each step…
+          </p>
         )}
-      </DialogContent>
-    </Dialog>
+        {error && (
+          <p className={cn("p-3 text-sm text-destructive", box)} role="alert">
+            {error}
+          </p>
+        )}
+        {ok && (
+          <p className="text-sm" role="status">
+            <span className="font-medium">{finalName} is connected.</span>{" "}
+            <span className="text-muted-foreground">
+              {result?.machine?.counts.total
+                ? `Its ${result.machine.counts.total} ${result.machine.counts.total === 1 ? "server is" : "servers are"} in the sidebar under ${finalName}.`
+                : `Its servers show up in the sidebar under ${finalName}.`}
+            </span>
+          </p>
+        )}
+        <DialogFooter>
+          {failed ? (
+            <>
+              <Button variant="outline" onClick={() => setPhase("form")}>
+                Back
+              </Button>
+              <Button onClick={() => void connect()}>
+                <RefreshCwIcon data-icon="inline-start" />
+                Try again
+              </Button>
+            </>
+          ) : (
+            <>
+              {phase === "running" && (
+                <Hint label="Closes this window; servedev finishes checking in the background">
+                  <DialogClose render={<Button variant="outline" />}>Close</DialogClose>
+                </Hint>
+              )}
+              <Button disabled={!ok} onClick={onDone}>
+                Done
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </div>
+    )}
+    </>
   )
 }
 
@@ -600,10 +599,15 @@ function BootDialog({ machine: m, onOpenChange }: { machine: Machine | null; onO
   const [error, setError] = React.useState<string | null>(null)
   const [installing, setInstalling] = React.useState(false)
   const name = m?.name
-
-  React.useEffect(() => {
+  // Another machine (or closing) starts over.
+  const [shownName, setShownName] = React.useState(name)
+  if (shownName !== name) {
+    setShownName(name)
     setInfo(null)
     setError(null)
+  }
+
+  React.useEffect(() => {
     if (!name) return
     let cancelled = false
     // Writes the boot script on the machine (harmless to repeat) and gives the task command.
