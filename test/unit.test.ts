@@ -7,6 +7,7 @@ import { discoverGroups, parseLsof, parsePs } from "../src/ports";
 import { detectPackageManager, planInstall } from "../src/install";
 import { detectCommand, findRoot } from "../src/project";
 import { programName } from "../src/daemon";
+import { declaredPort, pickPrimaryPort } from "../src/manager";
 
 test("clean strips ANSI and collapses carriage returns", () => {
   expect(clean("\x1b[32mready\x1b[0m\nprogress 10%\rprogress 100%\r\n")).toBe("ready\nprogress 100%\n");
@@ -158,4 +159,27 @@ test("planInstall has nothing to do when package.json lists no dependencies", ()
   fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ scripts: { dev: "node server.js" } }));
   expect(planInstall(dir, dir)).toMatchObject({ state: "ok", detail: "package.json lists no dependencies." });
   fs.rmSync(dir, { recursive: true });
+});
+
+test("declaredPort reads a fixed port or the port of an absolute ready url", () => {
+  expect(declaredPort({ portSpec: 7779, port: 7779, ready: {} })).toBe(7779);
+  expect(declaredPort({ ready: { url: "http://localhost:7779" } })).toBe(7779);
+  expect(declaredPort({ portSpec: "auto", port: 4100, ready: { url: "http://localhost:{port}/health" } })).toBe(4100);
+  expect(declaredPort({ portSpec: "auto", port: 4100, ready: {} })).toBeUndefined();
+  expect(declaredPort({ ready: { url: "/health" } })).toBeUndefined();
+  expect(declaredPort({ ready: { url: "http://localhost/" } })).toBeUndefined();
+});
+
+test("pickPrimaryPort prefers a declared port the server listens on", () => {
+  // Dev mode: a daemon on 7778 prints its URL first, then Vite on the declared 7779.
+  const dev = { portSpec: 7779, port: 7779, ready: { url: "http://localhost:7779" }, ports: [7778, 7779] };
+  expect(pickPrimaryPort(dev, [7778, 7779])).toBe(7779);
+  expect(pickPrimaryPort({ ...dev, portSpec: undefined, port: undefined }, [7778, 7779])).toBe(7779);
+  // Until the declared port shows up, and when nothing is declared, the old order applies.
+  expect(pickPrimaryPort({ ...dev, ports: [7778] }, [7778])).toBe(7778);
+  expect(pickPrimaryPort({ ready: {}, ports: [7778, 7779] }, [7779])).toBe(7779);
+  expect(pickPrimaryPort({ ready: {}, ports: [7778, 7779] }, [])).toBe(7778);
+  expect(pickPrimaryPort({ portSpec: "auto", port: 4100, ready: {}, ports: [4100, 4101] }, [4101])).toBe(4101);
+  expect(pickPrimaryPort({ portSpec: "auto", port: 4100, ready: {}, ports: [] }, [])).toBe(4100);
+  expect(pickPrimaryPort({ ready: {}, ports: [] }, [3000])).toBe(3000);
 });

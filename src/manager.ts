@@ -128,6 +128,33 @@ const MAX_LOG = 10 * 1024 * 1024;
 const MARK_EVERY_MS = 10_000;
 const PURGE_EVERY_MS = 60 * 60 * 1000;
 
+/** The port the config names: a fixed `port`, or the port in an absolute `ready.url`. */
+export function declaredPort(s: Pick<Server, "portSpec" | "port" | "ready">): number | undefined {
+  if (typeof s.portSpec === "number") return s.portSpec;
+  const u = s.ready.url;
+  if (!u || !/^https?:\/\//.test(u)) return undefined;
+  try {
+    const port = Number(new URL(s.port !== undefined ? u.replaceAll("{port}", String(s.port)) : u).port);
+    return port || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The port a server's URL points at. A declared port wins once the server listens on it; then
+ * the first printed URL it listens on, the assigned port, the lowest port, the first printed URL.
+ */
+export function pickPrimaryPort(s: Pick<Server, "portSpec" | "port" | "ready" | "ports">, loggedPorts: number[]): number | undefined {
+  const declared = declaredPort(s);
+  if (declared !== undefined && s.ports.includes(declared)) return declared;
+  const logged = loggedPorts.find((p) => s.ports.includes(p));
+  if (logged) return logged;
+  if (s.port !== undefined && (s.ports.includes(s.port) || s.ports.length === 0)) return s.port;
+  if (s.ports.length) return Math.min(...s.ports);
+  return loggedPorts[0];
+}
+
 export function groupAlive(pgid: number | undefined): boolean {
   if (!pgid) return false;
   try {
@@ -582,12 +609,7 @@ export class Manager extends EventEmitter {
   }
 
   private primaryPort(s: Server): number | undefined {
-    const rt = this.runtime(s.id);
-    const logged = rt.loggedPorts.find((p) => s.ports.includes(p));
-    if (logged) return logged;
-    if (s.port !== undefined && (s.ports.includes(s.port) || s.ports.length === 0)) return s.port;
-    if (s.ports.length) return Math.min(...s.ports);
-    return rt.loggedPorts[0];
+    return pickPrimaryPort(s, this.runtime(s.id).loggedPorts);
   }
 
   /** Incrementally scan new log output for the ready pattern and printed URLs. */
