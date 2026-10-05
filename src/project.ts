@@ -17,6 +17,8 @@ export interface ServerConfig {
   command: string;
   /** Runs before the command on every start, e.g. "pnpm install". */
   setup?: string;
+  /** Runs first when the server is stopped or restarted, e.g. "docker compose down"; signals follow for anything left. */
+  stop?: string;
   /** Custom hostname served by the daemon's proxy, e.g. "keel.localhost". */
   hostname?: string;
   cwd?: string;

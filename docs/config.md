@@ -40,6 +40,7 @@ Every server and profile remembers where it came from. The dashboard tags shared
       "command": "cloud-sql-proxy --auto-iam-authn my-proj:us-central1:db --port=5433",
       "ready": { "log": "ready for new connections" }
     },
+    "db": { "command": "docker compose up", "stop": "docker compose down", "port": 5432 },
     "api": { "command": "pnpm --filter api dev", "dependsOn": ["cloud-sql-proxy"] },
     "web": { "command": "pnpm --filter web dev", "port": 5173, "hostname": "web.localhost" }
   },
@@ -54,6 +55,7 @@ Every server and profile remembers where it came from. The dashboard tags shared
 }
 ```
 
+- `setup` runs before a server's command on every start; if it fails, the server doesn't start. `stop` runs first when it's stopped or restarted, in the server's folder with its environment and its output in the server's log; after it finishes (or fails, or runs past 30s) anything still running gets SIGTERM, then SIGKILL.
 - A shared profile can only list its own repo's servers, never another machine's: each machine that has the repo starts its own with it.
 - `accounts` says what the servers need, like a project. Personal accounts (emails) belong in your config; servedev warns when it finds one here.
 - `grid` is the default layout. Everyone can rearrange it for themselves without changing the file.

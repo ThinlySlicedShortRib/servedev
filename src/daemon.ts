@@ -61,6 +61,8 @@ export interface StartRequest {
   command?: string;
   /** Command to run before the server on this and later starts. */
   setup?: string;
+  /** Command to run first when stopping, e.g. "docker compose down"; "" removes it. */
+  stop?: string;
   /** Run the package manager install before starting. */
   install?: boolean;
   /** Custom hostname, e.g. keel.localhost. */
@@ -231,6 +233,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   migrateConfig();
   let resolved: Resolved = resolveConfig(config);
   manager.retentionDays = () => config.setting("log_retention_days");
+  manager.baseEnv = async (s) => ({ ...(await getLoginEnv()), ...resolved.servers.get(s.id)?.repoEnv });
   manager.sync(resolved.servers.values());
 
   // Other machines' servers, relayed through their own servedev (see src/remote).
@@ -410,6 +413,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       // Credentials on a command line (e.g. a taken-over cloud-sql-proxy --token=…) aren't shown.
       command: maskSecrets(s.command),
       setup: s.setup && maskSecrets(s.setup),
+      stop: s.stop && maskSecrets(s.stop),
       customUrl: s.hostname ? proxy.urlFor(s.hostname) : undefined,
       branch: branchOf(s.root),
       accountsStale: accountsStale(s) || undefined,
@@ -621,6 +625,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     else if (req.install) patch.setup = plan!.setup;
     // A detected JS dev script with no dependencies installed would just fail; install first.
     else if (!def?.setup && detected && plan?.state === "missing") patch.setup = plan.setup;
+    if (req.stop !== undefined) patch.stop = req.stop || null;
     if (req.hostname) {
       const hostname = normalizeHostname(req.hostname);
       const taken = [...resolved.servers.values()].find((o) => o.hostname === hostname && o.id !== id);
@@ -682,6 +687,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
           baseEnv,
           portSpec: def.portSpec,
           setup: def.setup,
+          stop: def.stop,
           hostname: def.hostname,
           ready: def.ready,
           pinned: def.pinned,
@@ -1563,7 +1569,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     config.editLocal((c) => {
       const mine = c.servers?.[def.project]?.[def.name] as Record<string, unknown> | undefined;
       if (!mine) return;
-      for (const key of ["command", "setup", "cwd", "port", "hostname", "ready"]) delete mine[key];
+      for (const key of ["command", "setup", "stop", "cwd", "port", "hostname", "ready"]) delete mine[key];
       const env = mine.env as Record<string, string> | undefined;
       if (env) {
         const kept = Object.fromEntries(Object.entries(env).filter(([k]) => keepEnv.includes(k)));
@@ -1921,7 +1927,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       const s = resolveRef(body.root, body.id ?? body.name, true);
       // The dashboard only ever sees commands with secrets masked (`--token=…`): sending that back
       // unchanged keeps the real value, and an edit that still holds a mask would save the mask.
-      const edited = (field: "command" | "setup", label: string): string | undefined => {
+      const edited = (field: "command" | "setup" | "stop", label: string): string | undefined => {
         const value = typeof body[field] === "string" ? body[field].trim() : undefined;
         const current = s[field] ?? "";
         if (value === undefined || value === current || value === maskSecrets(current)) return undefined;
@@ -1932,7 +1938,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       const command = edited("command", "command");
       if (command === "") throw new HttpError(400, "command can't be empty");
       const setup = edited("setup", "setup step");
-      configCall(() => writeServer(s.project, s.root, s.name, { command, setup: setup === "" ? null : setup }));
+      const stop = edited("stop", "stop command");
+      configCall(() => writeServer(s.project, s.root, s.name, { command, setup: setup === "" ? null : setup, stop: stop === "" ? null : stop }));
       reconcile();
       // The running process keeps the command it started with; a restart uses the new one.
       return { server: view(s) };

@@ -445,6 +445,7 @@ export interface ServerDef {
   root: string;
   command: string;
   setup?: string;
+  stop?: string;
   /** Absolute. */
   cwd: string;
   /** Your variables for it (from config.json). */
@@ -618,6 +619,7 @@ export function resolveConfig(store: ConfigStore): Resolved {
         root: info.root,
         command,
         setup: pick(l, r, "setup") || undefined,
+        stop: pick(l, r, "stop") || undefined,
         cwd: path.resolve(info.root, typeof cwd === "string" ? cwd : "."),
         env,
         repoEnv: isObject(r?.env) ? r!.env : undefined,

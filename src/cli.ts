@@ -41,6 +41,7 @@ import {
   opUp,
   opWait,
   opDirs,
+  opEdit,
   type OpResult,
 } from "./ops";
 import { clean } from "./logs";
@@ -61,6 +62,8 @@ Usage:
   servedev search [regex] [--errors|--warnings] [-C N] [--server NAME] [--since 5m] [--prev|--both|--history] [--all]
                                             search logs across servers (grep -n -C style)
   servedev restart [name]
+  servedev edit <name> [-- <command...>] [--setup <cmd>] [--stop <cmd>] [--restart]
+                                            change how a server starts and stops ("" removes setup/stop)
   servedev stop [names...] [--all]          stop servers (--all: every server in this project)
   servedev down                             stop every server in this project
   servedev wait [name]                      block until a starting server is ready
@@ -126,6 +129,7 @@ Start options:
   --timeout <sec>       how long to wait for readiness (default 60, or 300 with a setup step)
   --install             run the package manager install first (e.g. pnpm install)
   --setup <cmd>         run a setup command before the server, on every start
+  --stop <cmd>          run this first when stopping or restarting (e.g. docker compose down); signals follow
   --cwd <dir>           working directory for the command
   --hostname <host>     custom hostname, e.g. keel.localhost
   --env KEY=VALUE       environment variable kept with the server (repeatable; KEY= removes one).
@@ -211,6 +215,7 @@ async function main() {
       timeout: { type: "string", short: "t" },
       cwd: { type: "string" },
       setup: { type: "string" },
+      stop: { type: "string" },
       hostname: { type: "string" },
       clear: { type: "boolean" },
       install: { type: "boolean" },
@@ -286,6 +291,7 @@ async function main() {
         folder: o.dir,
         command,
         setup: o.setup,
+        stop: o.stop,
         install: o.install,
         hostname: o.hostname,
         dir: o.cwd,
@@ -442,6 +448,12 @@ async function main() {
     case "add":
       result = await opAddProject({ cwd, path: args[0] });
       break;
+    case "edit": {
+      if (!args[0]) throw new Error("usage: servedev edit <name> [-- <command...>] [--setup <cmd>] [--stop <cmd>] [--restart]");
+      const command = rest.length === 0 ? undefined : rest.length === 1 ? rest[0] : rest.map(shellQuote).join(" ");
+      result = await opEdit({ cwd, name: args[0], command, setup: o.setup, stop: o.stop, restart: o.restart });
+      break;
+    }
     case "restart":
       result = await opRestart({ cwd, name: on(args[0]), wait: !o["no-wait"], timeout, profile: o.profile });
       break;

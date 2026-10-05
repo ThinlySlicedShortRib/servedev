@@ -98,6 +98,7 @@ export const TOOLS = [
       hostname: { type: "string", description: 'Custom hostname served by servedev\'s proxy, e.g. "keel.localhost" -> http://keel.localhost.' },
       install: { type: "boolean", description: "Run the package manager install (e.g. pnpm install) before starting. Use when dependencies are missing." },
       setup: { type: "string", description: 'Command to run before the server on every start, e.g. "pnpm install && pnpm db:migrate".' },
+      stop: { type: "string", description: 'Command to run first when it\'s stopped or restarted, e.g. "docker compose down"; signals stop whatever is left.' },
       port: { description: 'Port number or "auto" to pick a free one (exported as $PORT).', anyOf: [{ type: "number" }, { type: "string", enum: ["auto"] }] },
       ready_log: { type: "string", description: "Regex; ready when log output matches (instead of waiting for a port)." },
       ready_url: { type: "string", description: 'URL or path like "/health"; ready when it answers with status < 500.' },
@@ -187,7 +188,8 @@ export const TOOLS = [
   {
     name: "edit_server",
     description:
-      "Change how a server starts without starting it: its command and/or its setup step (runs before the command on every start). " +
+      "Change how a server starts and stops without starting it: its command, its setup step (runs before the command on every start) " +
+      "and its stop command (runs first when it's stopped or restarted). " +
       "Kept in your config.json, on top of the repo's servedev.json if it defines the server. A running server keeps its old command " +
       "until restarted; pass restart=true to restart it now.",
     inputSchema: obj(
@@ -195,6 +197,7 @@ export const TOOLS = [
         name: serverRef,
         command: { type: "string", description: 'e.g. "pnpm --filter web dev". May contain {port}.' },
         setup: { type: "string", description: 'e.g. "pnpm install". Empty string removes it.' },
+        stop: { type: "string", description: 'Runs first when it\'s stopped or restarted, e.g. "docker compose down"; signals stop whatever is left. Empty string removes it.' },
         restart: { type: "boolean", description: "Restart it now if it's running." },
         ...cwdProp,
       },
@@ -590,6 +593,7 @@ export async function callTool(name: string, a: Args): Promise<OpResult> {
         folder: a.dir,
         command: a.command,
         setup: a.setup,
+        stop: a.stop,
         install: a.install,
         hostname: a.hostname,
         port: a.port,
@@ -619,7 +623,7 @@ export async function callTool(name: string, a: Args): Promise<OpResult> {
     case "set_hostname":
       return opHostname({ cwd, name: a.name, hostname: a.hostname || undefined, clear: !a.hostname });
     case "edit_server":
-      return opEdit({ cwd, name: ref()!, command: a.command, setup: a.setup, restart: a.restart });
+      return opEdit({ cwd, name: ref()!, command: a.command, setup: a.setup, stop: a.stop, restart: a.restart });
     case "inspect_folder":
       return opInspect({ cwd, path: a.path, machine: a.machine || undefined });
     case "list_folders":

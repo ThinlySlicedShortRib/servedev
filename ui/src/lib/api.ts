@@ -10,6 +10,8 @@ export interface Server {
   command: string
   /** Runs before command on every start. */
   setup?: string
+  /** Runs first when it's stopped or restarted; signals follow. */
+  stop?: string
   cwd: string
   port?: number
   status: Status

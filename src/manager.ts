@@ -21,6 +21,8 @@ export interface Server {
   command: string;
   /** Runs before `command` in the same shell, e.g. "pnpm install". */
   setup?: string;
+  /** Runs first when stopping, e.g. "docker compose down"; signals follow for anything left. */
+  stop?: string;
   cwd: string;
   /** Variables set on purpose (--env, the dashboard). The rest comes from the login shell at each start. */
   env: Record<string, string>;
@@ -95,6 +97,7 @@ export interface StartSpec {
   portSpec?: number | "auto";
   portArgs?: string;
   setup?: string;
+  stop?: string;
   hostname?: string;
   ready: ReadySpec;
   /**
@@ -120,6 +123,8 @@ interface Runtime {
   loggedPorts: number[];
   /** When a log mark was last written to the database. */
   lastMark: number;
+  /** The run's environment, for its stop command. Unknown for a run adopted after a daemon restart. */
+  env?: Record<string, string>;
 }
 
 const URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|[\w.-]+\.local):(\d{2,5})/g;
@@ -127,6 +132,8 @@ const MAX_LOG = 10 * 1024 * 1024;
 /** Persist a log write-time mark at most this often per run. */
 const MARK_EVERY_MS = 10_000;
 const PURGE_EVERY_MS = 60 * 60 * 1000;
+/** How long a server's stop command gets before signals take over. */
+const STOP_COMMAND_MS = 30_000;
 
 /** The port the config names: a fixed `port`, or the port in an absolute `ready.url`. */
 export function declaredPort(s: Pick<Server, "portSpec" | "port" | "ready">): number | undefined {
@@ -201,6 +208,8 @@ export class Manager extends EventEmitter {
   private hidden = new Map<string, Server>();
   /** Log retention in days (a setting in config.json). */
   retentionDays: () => number = () => 7;
+  /** Environment under a server's own variables (login shell, servedev.json), for a stop command when its run's isn't known. */
+  baseEnv: (s: Server) => Promise<Record<string, string>> = async () => process.env as Record<string, string>;
 
   constructor() {
     super();
@@ -329,13 +338,14 @@ export class Manager extends EventEmitter {
       let s = this.servers.get(d.id) ?? this.hidden.get(d.id);
       const fresh = !s;
       s ??= { id: d.id, name: d.name, project: d.project, root: d.root, command: d.command, cwd: d.cwd, env: {}, ready: {}, status: "stopped", ports: [], logFile: "", restarts: 0 };
-      const before = JSON.stringify([s.command, s.setup, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]);
+      const before = JSON.stringify([s.command, s.setup, s.stop, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]);
       Object.assign(s, {
         name: d.name,
         project: d.project,
         root: d.root,
         command: d.command,
         setup: d.setup,
+        stop: d.stop,
         cwd: d.cwd,
         env: d.env,
         portSpec: d.portSpec,
@@ -346,7 +356,7 @@ export class Manager extends EventEmitter {
       const shown = this.servers.has(d.id);
       this.servers.set(d.id, s);
       this.hidden.delete(d.id);
-      if (fresh || !shown || JSON.stringify([s.command, s.setup, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]) !== before) {
+      if (fresh || !shown || JSON.stringify([s.command, s.setup, s.stop, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]) !== before) {
         this.emit("change", s);
       }
     }
@@ -408,6 +418,7 @@ export class Manager extends EventEmitter {
       root: spec.root,
       command: spec.command,
       setup: spec.setup,
+      stop: spec.stop,
       cwd: spec.cwd,
       env: spec.env,
       portSpec: spec.portSpec,
@@ -444,6 +455,7 @@ export class Manager extends EventEmitter {
       BROWSER: "none",
     };
     if (port !== undefined) env.PORT = String(port);
+    rt.env = env;
     // Setup output goes to the same log; a failing setup exits before the server starts.
     const script = spec.setup
       ? `echo ${shq(`[servedev] $ ${spec.setup}`)}\n${spec.setup} || exit $?\necho ${shq(`[servedev] $ ${command}`)}\n${command}`
@@ -513,6 +525,7 @@ export class Manager extends EventEmitter {
     // Catch groups created since the last check, so every process gets the signal.
     this.trackGroups(s, await processTable());
     this.changed(s);
+    if (s.stop) await this.runStopCommand(s);
     signalServer(s, "SIGTERM");
     for (let i = 0; i < 50 && serverAlive(s); i++) await Bun.sleep(100);
     if (serverAlive(s)) {
@@ -521,6 +534,48 @@ export class Manager extends EventEmitter {
     }
     this.finalize(s, gen);
     return s;
+  }
+
+  /**
+   * Run the server's stop command (e.g. "docker compose down") in its folder, with its run's
+   * environment and its output in the server's log. Signals follow either way, so a failing or
+   * hanging stop command can't keep the server running.
+   */
+  private async runStopCommand(s: Server) {
+    const log = (line: string) => s.logFile && fs.appendFileSync(s.logFile, `[servedev] ${line}\n`);
+    const env = this.runtime(s.id).env ?? {
+      ...(await this.baseEnv(s)),
+      ...s.env,
+      PWD: s.cwd,
+      BROWSER: "none",
+      ...(s.port !== undefined ? { PORT: String(s.port) } : {}),
+    };
+    log(`$ ${s.stop}`);
+    const failure = await new Promise<string | undefined>((resolve) => {
+      const out = s.logFile ? fs.openSync(s.logFile, "a") : "ignore";
+      let child: ChildProcess;
+      try {
+        // In a group of its own, so a timeout takes down whatever it started.
+        child = spawn("/bin/sh", ["-c", s.stop!], { cwd: s.cwd, env, detached: true, stdio: ["ignore", out, out] });
+      } catch (e) {
+        return resolve((e as Error).message);
+      } finally {
+        if (typeof out === "number") fs.closeSync(out);
+      }
+      const timer = setTimeout(() => {
+        if (child.pid) signalGroup(child.pid, "SIGKILL");
+        resolve(`still running after ${STOP_COMMAND_MS / 1000}s`);
+      }, STOP_COMMAND_MS);
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        resolve(e.message);
+      });
+      child.on("exit", (code, signal) => {
+        clearTimeout(timer);
+        resolve(code === 0 ? undefined : signal ? `killed by ${signal}` : `exited with code ${code}`);
+      });
+    });
+    if (failure) log(`stop command ${failure}; stopping with signals`);
   }
 
   async remove(id: string) {

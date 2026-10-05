@@ -8,7 +8,7 @@ import { RemoteApiError } from "./api";
 import { RefError, resolveRemoteRef } from "./ids";
 
 /** What a start request may carry to another machine (never the hub's paths or environment). */
-const PASSED = ["command", "setup", "install", "hostname", "cwd", "vars", "replaceVars", "port", "ready", "timeout", "restart", "wait", "profile"] as const;
+const PASSED = ["command", "setup", "stop", "install", "hostname", "cwd", "vars", "replaceVars", "port", "ready", "timeout", "restart", "wait", "profile"] as const;
 
 export interface RemoteStartRequest {
   /** Server name there, or its id there ("demo:api"). */

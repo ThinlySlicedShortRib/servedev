@@ -28,6 +28,10 @@
             "type": "string",
             "description": "Runs before the command on every start, e.g. \"pnpm install\"."
           },
+          "stop": {
+            "type": "string",
+            "description": "Runs first when the server is stopped or restarted, in its folder with its environment, e.g. \"docker compose down\". Anything still running afterwards gets SIGTERM, then SIGKILL."
+          },
           "cwd": {
             "type": "string",
             "description": "Folder to run in, relative to the project (the folder with servedev.json)."

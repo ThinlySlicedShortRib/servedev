@@ -72,6 +72,14 @@ describe("serverToConfig", () => {
     expect(serverToConfig(s, { includeSecrets: true }).entry.env).toEqual({ DEBUG: "1", API_TOKEN: "x" });
     expect(serverToConfig(server(root, { cwd: root, ready: { mode: "none" } })).entry).toEqual({ command: "pnpm dev", ready: "none" });
   });
+
+  test("a stop command is written and compared like the command", () => {
+    const root = project({ servers: { web: { command: "docker compose up", cwd: "apps/web" } } });
+    const s = server(root, { command: "docker compose up", stop: "docker compose down" });
+    expect(serverToConfig(s).entry).toEqual({ command: "docker compose up", stop: "docker compose down", cwd: "apps/web" });
+    expect(planSave(s).changes).toEqual([{ key: "stop", before: undefined, after: "docker compose down" }]);
+    expect(configState(s)).toBe("differs");
+  });
 });
 
 describe("saveToConfig", () => {
