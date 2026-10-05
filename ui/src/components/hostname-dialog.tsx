@@ -17,16 +17,28 @@ interface HostnameResponse {
 
 /** Set or remove a server's custom hostname, e.g. keel.localhost. */
 export function HostnameDialog({ server, open, onOpenChange }: { server: Server; open: boolean; onOpenChange: (open: boolean) => void }) {
-  const [value, setValue] = React.useState("")
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Custom URL</DialogTitle>
+          <DialogDescription>
+            Reach {server.name} at a name instead of a port. servedev runs a small proxy on this Mac that sends the name to whatever port the
+            server is using, including after restarts.
+          </DialogDescription>
+        </DialogHeader>
+        {/* Mounted only while open, so each opening starts from the server's current hostname. */}
+        <HostnameForm server={server} onDone={() => onOpenChange(false)} />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function HostnameForm({ server, onDone }: { server: Server; onDone: () => void }) {
+  const [value, setValue] = React.useState(server.hostname ?? "")
   const [saving, setSaving] = React.useState<"save" | "remove" | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const suggestion = `${server.project}.localhost`
-
-  React.useEffect(() => {
-    if (!open) return
-    setValue(server.hostname ?? "")
-    setError(null)
-  }, [open, server.hostname])
 
   async function submit(hostname: string | null) {
     setSaving(hostname ? "save" : "remove")
@@ -42,7 +54,7 @@ export function HostnameDialog({ server, open, onOpenChange }: { server: Server;
             : undefined
         toast.success(`${server.name} is now ${r.server.customUrl ?? r.server.hostname}`, { description: [extra, r.note].filter(Boolean).join(" ") || undefined })
       }
-      onOpenChange(false)
+      onDone()
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -54,68 +66,57 @@ export function HostnameDialog({ server, open, onOpenChange }: { server: Server;
   const notLocal = trimmed !== "" && !/\.localhost\.?(:\d+)?\/?$/i.test(trimmed.replace(/^[a-z]+:\/\//i, ""))
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Custom URL</DialogTitle>
-          <DialogDescription>
-            Reach {server.name} at a name instead of a port. servedev runs a small proxy on this Mac that sends the name to whatever port the
-            server is using, including after restarts.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (trimmed) void submit(trimmed)
-          }}
-          className="flex flex-col gap-6"
-        >
-          <FieldGroup>
-            <Field data-invalid={error ? true : undefined}>
-              <FieldLabel htmlFor="hostname">Hostname</FieldLabel>
-              <InputGroup>
-                <InputGroupAddon>
-                  <InputGroupText>http://</InputGroupText>
-                </InputGroupAddon>
-                <InputGroupInput
-                  id="hostname"
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  placeholder={suggestion}
-                  className="font-mono"
-                  autoComplete="off"
-                  spellCheck={false}
-                  autoFocus
-                  aria-invalid={error ? true : undefined}
-                />
-              </InputGroup>
-              <FieldDescription>
-                {notLocal
-                  ? `Names outside .localhost don't point at this Mac on their own; you'd also need a "127.0.0.1 ${trimmed}" line in /etc/hosts.`
-                  : "Names ending in .localhost work in every browser without any setup. Only this Mac can reach them."}
-              </FieldDescription>
-            </Field>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-          </FieldGroup>
-          <DialogFooter>
-            {server.hostname && (
-              <Button type="button" variant="ghost" className="sm:mr-auto" disabled={!!saving} onClick={() => submit(null)}>
-                {saving === "remove" && <Spinner data-icon="inline-start" />}
-                Remove
-              </Button>
-            )}
-            <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit" disabled={!trimmed || !!saving}>
-              {saving === "save" && <Spinner data-icon="inline-start" />}
-              Save
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (trimmed) void submit(trimmed)
+      }}
+      className="flex flex-col gap-6"
+    >
+      <FieldGroup>
+        <Field data-invalid={error ? true : undefined}>
+          <FieldLabel htmlFor="hostname">Hostname</FieldLabel>
+          <InputGroup>
+            <InputGroupAddon>
+              <InputGroupText>http://</InputGroupText>
+            </InputGroupAddon>
+            <InputGroupInput
+              id="hostname"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={suggestion}
+              className="font-mono"
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+              aria-invalid={error ? true : undefined}
+            />
+          </InputGroup>
+          <FieldDescription>
+            {notLocal
+              ? `Names outside .localhost don't point at this Mac on their own; you'd also need a "127.0.0.1 ${trimmed}" line in /etc/hosts.`
+              : "Names ending in .localhost work in every browser without any setup. Only this Mac can reach them."}
+          </FieldDescription>
+        </Field>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+      </FieldGroup>
+      <DialogFooter>
+        {server.hostname && (
+          <Button type="button" variant="ghost" className="sm:mr-auto" disabled={!!saving} onClick={() => submit(null)}>
+            {saving === "remove" && <Spinner data-icon="inline-start" />}
+            Remove
+          </Button>
+        )}
+        <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+        <Button type="submit" disabled={!trimmed || !!saving}>
+          {saving === "save" && <Spinner data-icon="inline-start" />}
+          Save
+        </Button>
+      </DialogFooter>
+    </form>
   )
 }
