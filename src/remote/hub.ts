@@ -12,6 +12,7 @@ import { RefError, assertMachineName, remoteId, resolveRemoteRef, splitRef } fro
 import { Machine, type MachineDeps } from "./machine";
 import { assertRemotePath, isMissingEndpoint, remoteStartBody, tooOld } from "./create";
 import type { MachineConfig, MachineSummary, RemoteServerView, SetupStep } from "./types";
+import type { UpdateReport } from "./update";
 import type { ProfileView } from "../config";
 import { remoteProfileView, sharedOn, type MachineLookup } from "./profiles";
 
@@ -117,6 +118,13 @@ export class RemoteHub extends EventEmitter {
   remove(name: string) {
     this.get(name);
     this.drop(name, true);
+  }
+
+  /** Update servedev on a machine and restart its daemon; then it's reconnected and checked. */
+  async update(name: string): Promise<UpdateReport & { steps: SetupStep[]; machine: MachineSummary }> {
+    const m = this.get(name);
+    const { report, steps } = await m.update();
+    return { ...report, steps, machine: this.summary(m) };
   }
 
   get(name: string): Machine {

@@ -2,6 +2,7 @@
 import { api } from "../client";
 import { ago, table, type OpResult } from "../ops";
 import type { MachineSummary, SetupStep } from "./types";
+import { compareVersions, type UpdateReport } from "./update";
 
 const MARK: Record<SetupStep["status"], string> = { ok: "✓", warning: "⚠", failed: "✗", skipped: "·" };
 
@@ -54,7 +55,7 @@ export async function opRemoteList(): Promise<OpResult> {
     ]);
   }
   const notes = r.machines.flatMap((m) => [
-    ...(m.versionMismatch ? [`${m.name} runs servedev ${m.version}; this machine runs ${m.hubVersion}. Update one so they match.`] : []),
+    ...(m.versionMismatch ? [`${m.name} runs servedev ${m.version}; this machine runs ${m.hubVersion}. Update one so they match (on ${m.name}: servedev remote update ${m.name}).`] : []),
     ...(m.state !== "connected" && m.lastError ? [`${m.name}: ${m.lastError}${m.hint ? `\n  fix: ${m.hint}` : ""}${m.nextRetryAt ? `\n  ${m.nextRetryAt > Date.now() ? `next try in ${Math.round((m.nextRetryAt - Date.now()) / 1000)}s` : "trying now"} (or now: servedev remote reconnect ${m.name})` : ""}`] : []),
   ]);
   return { ok: true, text: table(rows) + (notes.length ? `\n\n${notes.join("\n")}` : ""), data: r };
@@ -69,6 +70,31 @@ export async function opRemoteReconnect(name: string): Promise<OpResult> {
   const r = await api<{ ok: boolean; steps: SetupStep[]; machine: MachineSummary }>("/api/machines/reconnect", { name });
   const text = `Reconnecting ${name}:\n${describeSteps(r.steps)}\n\n` + (r.ok ? `✓ ${name} is connected: ${serverCounts(r.machine)}.` : `✗ still not connected; servedev keeps retrying in the background.`);
   return { ok: r.ok, text, data: r };
+}
+
+export async function opRemoteUpdate(name: string): Promise<OpResult> {
+  const r = await api<UpdateReport & { steps: SetupStep[]; machine: MachineSummary }>("/api/machines/update", { name });
+  const how = r.kind === "binary" ? `a build in ${r.repo}` : `${r.repo}, run from source`;
+  const lines = [`Updating servedev on ${name} (${how}, branch ${r.branch}):`, ...r.done.map((d) => `  ✓ ${d}`)];
+  if (r.commits.length) lines.push("", "New commits:", ...r.commits.slice(0, 15).map((c) => `  ${c}`), ...(r.commits.length > 15 ? [`  … and ${r.commits.length - 15} more`] : []));
+  if (r.error) lines.push(`  ✗ ${r.error}${r.hint ? `\n      fix: ${r.hint}` : ""}`);
+  const after = r.machine.version ?? r.after?.version;
+  lines.push(
+    "",
+    `Commit: ${r.before.commit} → ${r.after?.commit ?? r.before.commit}. servedev on ${name}: ${r.before.version ?? "?"} → ${after ?? "?"}; this machine runs ${r.hubVersion}` +
+      (after && after !== r.hubVersion
+        ? compareVersions(after, r.hubVersion) > 0
+          ? ` (newer there: update servedev here too)`
+          : ` (older there: ${r.branch} on ${name} doesn't have this machine's version; push it, then update again)`
+        : "") +
+      ".",
+    "",
+    `Reconnecting ${name}:`,
+    describeSteps(r.steps),
+  );
+  const connected = r.machine.state === "connected";
+  if (!connected) lines.push("", `✗ ${name} isn't connected again yet; servedev keeps retrying in the background.`);
+  return { ok: r.ok && connected, text: lines.join("\n"), data: r };
 }
 
 export async function opRemoteBoot(a: { name: string; install?: boolean }): Promise<OpResult> {

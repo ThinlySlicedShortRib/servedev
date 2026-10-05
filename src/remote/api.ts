@@ -8,9 +8,23 @@ export class RemoteApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Its servedev doesn't have this endpoint (it's older than the hub's). */
+    public missingEndpoint = false,
   ) {
     super(message);
   }
+}
+
+/** A servedev's answer to an endpoint it doesn't have: "not found: POST /api/command". */
+export function isNotFound(status: number, message: string): boolean {
+  return status === 404 && /^not found: (GET|POST) \/api\//.test(message);
+}
+
+export interface RemoteApiOptions {
+  /** The machine's name, for errors. */
+  machine?: string;
+  /** Its servedev version as last seen, for errors. */
+  version?: () => string | undefined;
 }
 
 export class RemoteApi {
@@ -20,6 +34,7 @@ export class RemoteApi {
     /** The remote daemon's port, for its Host check. */
     readonly remotePort: number,
     readonly token: string,
+    readonly opts: RemoteApiOptions = {},
   ) {}
 
   private headers(json: boolean): Record<string, string> {
@@ -39,6 +54,21 @@ export class RemoteApi {
     }
   }
 
+  /**
+   * An error from the remote. One for an endpoint it doesn't have says its servedev is older and
+   * how to update it, instead of a bare "not found".
+   */
+  private error(status: number, message: string): RemoteApiError {
+    if (!isNotFound(status, message)) return new RemoteApiError(status, message);
+    const what = message.replace(/^not found: /, "");
+    const m = this.opts.machine;
+    const version = this.opts.version?.();
+    const text = m
+      ? `${m} runs an older servedev${version ? ` (${version})` : ""} that can't do this yet (${what}); update it: servedev remote update ${m}`
+      : `the other machine runs an older servedev that can't do this yet (${what}); update it`;
+    return new RemoteApiError(501, text, true);
+  }
+
   /** JSON request; the remote's errors come back with its status and message. */
   async call<T = any>(method: "GET" | "POST", path: string, body?: unknown, timeoutMs = 120_000): Promise<T> {
     let res: Response;
@@ -53,7 +83,7 @@ export class RemoteApi {
       throw new RemoteApiError(502, (e as Error).message);
     }
     const data = (await res.json().catch(() => ({ error: `HTTP ${res.status}` }))) as any;
-    if (!res.ok) throw new RemoteApiError(res.status, data?.error ?? `HTTP ${res.status}`);
+    if (!res.ok) throw this.error(res.status, data?.error ?? `HTTP ${res.status}`);
     return data as T;
   }
 
@@ -62,7 +92,7 @@ export class RemoteApi {
     const res = await fetch(this.url(path), { headers: this.headers(false), signal });
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as any;
-      throw new RemoteApiError(res.status, data?.error ?? `HTTP ${res.status}`);
+      throw this.error(res.status, data?.error ?? `HTTP ${res.status}`);
     }
     return res;
   }

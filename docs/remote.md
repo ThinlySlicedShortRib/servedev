@@ -15,6 +15,7 @@ servedev profile start "Full stack"          # each server on its machine, in or
 servedev pin pc/demo:api                     # pinned on pc: starts whenever servedev starts there
 servedev remote ls                           # connected / reconnecting / offline, versions, forwards
 servedev remote reconnect pc                 # now, instead of waiting for the next retry
+servedev remote update pc                    # update servedev there (git pull, install or build) and restart its daemon
 servedev remote rm pc                        # forget it here (nothing changes on pc)
 ```
 
@@ -30,7 +31,7 @@ The "Add machine" checklist (`remote add`, `remote reconnect`, the dashboard) is
 
 Connection states: **connecting** (first try), **connected**, **reconnecting** (lost it; retries after 1s, 2s, 4s … with the attempt count), **offline** (still failing after 5 tries; retried every minute). The hub notices a lost machine through SSH keepalives (within ~45s), the remote's event stream ending, or a health check every 15s.
 
-A different servedev version on the machine is reported (in the checklist and `remote ls`), not fixed: update one side so they match.
+A different servedev version on the machine is reported (in the checklist and `remote ls`), not fixed on its own: update one side so they match (`servedev remote update pc` for the machine, below).
 
 ### Where things are kept
 
@@ -40,6 +41,24 @@ A different servedev version on the machine is reported (in the checklist and `r
 | Its API token | macOS Keychain (`dev.servedev.machine`), elsewhere `~/.servedev/machines/<name>.token` (mode 600). Never config.json. |
 | Last known servers, version, last seen | `~/.servedev/machines/<name>.json` |
 | SSH control socket | `~/.servedev/machines/<name>.sock` |
+
+## Updating servedev on a machine
+
+```sh
+servedev remote update pc
+```
+
+Over the machine's SSH connection, servedev finds where its `servedev` comes from (the same way setup finds it, then following symlinks and wrapper scripts):
+
+- **A git checkout run from source** (e.g. `~/.local/bin/servedev` containing `exec ~/.bun/bin/bun ~/servedev/src/cli.ts "$@"`): `git pull --ff-only`, `bun install` when `package.json` or the lockfile changed, then `servedev daemon restart`.
+- **A binary built in a git checkout** (`<checkout>/dist/servedev`, symlinked onto PATH): `git pull --ff-only`, `bun run build` (also when the binary is older than the checkout's last commit), then the restart.
+- **Anything else**: refused, with how to update it by hand.
+
+It's also refused, before anything changes there, when the checkout has uncommitted changes (untracked files are fine), isn't on a branch, has no upstream, or has commits of its own that its upstream doesn't (it can't fast-forward). `bun` is found on the login PATH, in the wrapper script, or in `~/.bun/bin`.
+
+The restart keeps the servers running; the new daemon adopts them. Then the hub reconnects and runs the checklist. The answer lists what was done, the new commits, the commit and servedev version before and after there, and this machine's version. A source checkout's own dashboard (the machine's, not the hub's) needs `bun run build:ui` there after a change to `ui/`; the answer says so.
+
+**Older servedev on the machine.** A request the machine's servedev doesn't have an endpoint for answers "pc runs an older servedev (0.3.0) that can't do this yet (POST /api/command); update it: servedev remote update pc" instead of a bare 404.
 
 ## Creating servers on another machine
 
@@ -60,7 +79,7 @@ servedev start pc/web                                   # once it exists: by nam
 
 In the dashboard, **New server** gets a **Machine** picker once a machine is added (one that isn't connected is listed but can't be picked, with why). With a machine picked, the folder is a path there, **Browse…** opens a small navigator over that machine's folders, detection and the dependency check run there, and the name's description says where it'll open here. The new server shows up under that machine in the sidebar and opens, like a local one.
 
-**Versions.** Starting and inspecting work with any servedev on the machine. Browsing its folders needs the `/api/dirs` endpoint (servedev 0.3.0); an older one answers "pc runs servedev 0.2.0, which can't list its folders (type the path instead); update it", and typing the path still works. `remote ls` and the Machines sheet show when versions differ.
+**Versions.** Starting and inspecting work with any servedev on the machine. Browsing its folders needs the `/api/dirs` endpoint (servedev 0.3.0); an older one answers "pc runs servedev 0.2.0, which can't list its folders (type the path instead); update it: servedev remote update pc", and typing the path still works. `remote ls` and the Machines sheet show when versions differ.
 
 ## Profiles, grids and pins across machines
 
@@ -80,7 +99,7 @@ Nothing is synced between machines; each profile belongs somewhere, and that dec
 
 ## Agents
 
-The MCP server's server tools take an optional `machine` (or a `pc/…` id as the name): `start_server`, `stop_server` (with `all`: everything running on that machine), `restart_server`, `remove_server`, `server_status`, `server_logs`, `search_logs`, `server_runs`, `list_servers` (each remote server has `machine`), `inspect_folder`, and `list_folders`. `start_server` with `machine` and `dir` creates a server in a folder there. Profile and grid tools (`create_profile`, `update_profile`, `start_profile`, `start_servers` with a profile, `set_grid`, `update_grid`) take `pc/…` ids too. `list_machines` shows each machine's state, system, version, server counts and forwarded ports; `reconnect_machine` retries one now and reports the checklist. `servedev instructions` (for CLAUDE.md / AGENTS.md) mentions all of this.
+The MCP server's server tools take an optional `machine` (or a `pc/…` id as the name): `start_server`, `stop_server` (with `all`: everything running on that machine), `restart_server`, `remove_server`, `server_status`, `server_logs`, `search_logs`, `server_runs`, `list_servers` (each remote server has `machine`), `inspect_folder`, and `list_folders`. `start_server` with `machine` and `dir` creates a server in a folder there. Profile and grid tools (`create_profile`, `update_profile`, `start_profile`, `start_servers` with a profile, `set_grid`, `update_grid`) take `pc/…` ids too. `list_machines` shows each machine's state, system, version, server counts and forwarded ports; `reconnect_machine` retries one now and reports the checklist; `update_machine` updates servedev there, like `remote update`. `servedev instructions` (for CLAUDE.md / AGENTS.md) mentions all of this.
 
 ## Windows PCs (servers in WSL)
 
@@ -105,7 +124,7 @@ The task is a logon task named `servedev-wsl` that runs `conhost.exe --headless 
 
 Once a machine is added, the sidebar groups servers by machine: this one first, then each other machine with its own projects. A machine's header shows its state, how many of its servers run (and crashed), and folds its servers away; while it's reconnecting or offline a second line says so, with **Retry**. A remote server's row shows the port it has on its machine; the link opens it here (at `<server>.<machine>.localhost`, or the forwarded port). An offline machine's servers stay in the list, dimmed, with their last known state, and count in the status filters that way.
 
-**Machines** (next to Accounts) lists the machines: state, system, address, servedev version, servers and forwarded ports, with Reconnect now, Show only its servers, Copy SSH command, Start with Windows (the boot task below) and Remove. **Add machine** there runs the same checklist as `remote add`.
+**Machines** (next to Accounts) lists the machines: state, system, address, servedev version, servers and forwarded ports, with Reconnect now, Show only its servers, Copy SSH command, Update servedev, Start with Windows (the boot task below) and Remove. When its version differs from this machine's, an **Update** button sits next to it; the update dialog shows what was done, the new commits, versions before and after, and the reconnect checklist. **Add machine** there runs the same checklist as `remote add`.
 
 A remote server's page says which machine it's on, where its address here leads (`→ pc:3000`, and the local port when that one was busy here), and pauses its actions while the machine isn't connected. Remote servers can go on any custom grid of yours (with a small machine tag).
 
@@ -123,6 +142,7 @@ All under the hub's token, like the rest of the API.
 | `POST /api/machines/reconnect` `{ name }` | `{ ok, steps, machine }` |
 | `POST /api/machines/remove` `{ name }` | `{ removed }` |
 | `POST /api/machines/boot` `{ name, install? }` | `{ supported, script, powershell, installed?, note? }` |
+| `POST /api/machines/update` `{ name }` | `{ ok, kind, repo, branch, before, after, commits, done, error?, hint?, restarted, hubVersion, steps, machine }`; 409 when refused (nothing changed there) |
 | `GET /api/stream/events` | The snapshot has `machines`; remote servers arrive as `server` / `remove` events with `pc/` ids; `machine` (a MachineSummary) when a machine's state or forwards change; `machine-removed` `{ name }`; `profiles` again when a machine's servers, shared profiles or state change what profiles show |
 | `GET /api/profiles` | Yours (members on another machine as `pc/` ids, with `unavailable`: the ones whose machine isn't connected) and this machine's shared ones, then each machine's shared ones (`machine`, `pc/` ids) |
 | `POST /api/profiles/start`, `POST /api/servers/start` `{ ids, profile }` | In order across machines; results may have `machine`, `skipped` (machine not connected) and `note` (e.g. which accounts a remote server used) |

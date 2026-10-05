@@ -117,6 +117,7 @@ curl http://api.pc.localhost:7780        # its ports, forwarded here
 servedev start web --on pc --dir '~/code/app' -- npm run dev   # a new server there, defined on pc
 servedev profile create "Full stack" pc/demo:api web            # your profiles can mix machines
 servedev profile start "Full stack"      # pc's api first (on pc), then web here, each once the previous is ready
+servedev remote update pc                # git pull there, install or build, restart its daemon (servers keep running)
 ```
 
 This servedev becomes a hub: it keeps one SSH connection per machine and talks to that machine's own servedev through it, forwarding the ports its servers listen on. Machines show as connected, reconnecting or offline (with their last known servers). New servers can be created on a machine from the CLI, the dashboard's New server dialog (pick the machine, browse its folders) or agents (`start_server` with `machine` and `dir`). Your own profiles and grids can hold servers from any machine; profiles shared in a repo on another machine show up too and start that machine's servers. See [docs/remote.md](docs/remote.md), including starting servedev when a Windows PC boots.
@@ -180,6 +181,7 @@ MCP tools cover everything the dashboard can do, so you can ask an agent to "mak
 | Profiles | `list_profiles`, `create_profile`, `update_profile`, `delete_profile`, `start_profile` |
 | Custom grid | `get_grid`, `set_grid` (servers + columns, or exact tiles), `update_grid`, `save_grid_as_profile`; an open dashboard updates live |
 | Outside servers | `take_over_server`, `stop_outside_server` |
+| Other machines | `list_machines`, `reconnect_machine`, `update_machine`, `list_folders` (server tools take `machine`) |
 | Settings | `get_settings`, `update_settings` (log retention, proxy port, login autostart) |
 
 ## How it works

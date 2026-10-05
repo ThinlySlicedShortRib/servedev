@@ -1886,6 +1886,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       return { ok: m.connected, steps, machine: hub.summary(m) };
     }
     if (p === "/api/machines/boot" && req.method === "POST") return bootTask(String(body.name ?? ""), !!body.install);
+    if (p === "/api/machines/update" && req.method === "POST") return hub.update(String(body.name ?? ""));
     if (p === "/api/pin" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
       const on = body.pinned !== false;

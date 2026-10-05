@@ -18,6 +18,7 @@ import { readSse } from "./sse";
 import { failed, initial, retryNow, succeeded, type ConnStatus } from "./state";
 import { SshLink, createTransport, detect, type Detected, type Transport } from "./transport";
 import type { MachineConfig, SetupStep } from "./types";
+import { updateServedev, type UpdateReport } from "./update";
 
 export interface MachineDeps {
   /** Holds control sockets, cached state and (off macOS) tokens. */
@@ -55,6 +56,8 @@ export class Machine extends EventEmitter {
   readonly forwards = new Map<number, { localPort: number; target: Target }>();
   /** Dev servers running there that its servedev didn't start (from a terminal, an agent): their ports are forwarded too. */
   outside: { command: string; ports: number[] }[] = [];
+  /** An update is restarting its daemon: losing it then isn't a lost connection. */
+  private updating = false;
   /** Server id -> hub hostname (api.pc.localhost). */
   aliases = new Map<string, string>();
   steps?: SetupStep[];
@@ -247,7 +250,7 @@ export class Machine extends EventEmitter {
     const local = await chooseLocalPort(0, this.deps.reserved, this.deps.ports ?? systemPorts);
     await link.forward(local, remotePort);
     this.deps.reserved.add(local);
-    const api = new RemoteApi(local, remotePort, token);
+    const api = new RemoteApi(local, remotePort, token, { machine: this.name, version: () => this.version });
     try {
       const health = await api.health(10_000);
       if (!health) throw new StepError(`nothing answers on port ${remotePort} on ${this.name}`, `is servedev's daemon running there? (servedev daemon status)`);
@@ -362,6 +365,25 @@ export class Machine extends EventEmitter {
     this.saveSoon();
   }
 
+  /**
+   * Update servedev there and restart its daemon (see update.ts), then reconnect, so the checklist
+   * runs again against the new one. Refusals throw before anything changes there.
+   */
+  async update(): Promise<{ report: UpdateReport; steps: SetupStep[] }> {
+    const transport = this.liveTransport();
+    if (this.updating) throw new RemoteApiError(409, `${this.name} is being updated already`);
+    // Its daemon restarting ends the event stream and fails health checks; that's expected.
+    this.updating = true;
+    let report: UpdateReport;
+    try {
+      report = await updateServedev(transport, this.name, this.deps.hubVersion);
+    } finally {
+      this.updating = false;
+    }
+    const steps = await this.reconnect();
+    return { report, steps };
+  }
+
   private serversChanged(ids: string[]) {
     this.aliases = hostAliases(this.name, [...this.servers.values()]);
     for (const id of ids) this.emit("server", id);
@@ -370,7 +392,7 @@ export class Machine extends EventEmitter {
   }
 
   private lost(gen: number, reason: string) {
-    if (gen !== this.generation || !this.connected) return;
+    if (gen !== this.generation || !this.connected || this.updating) return;
     this.teardown();
     this.lose({ message: reason });
   }

@@ -91,6 +91,24 @@ export interface Machine {
   steps?: SetupStep[]
 }
 
+/** POST /api/machines/update: servedev updated there and its daemon restarted, then the reconnect checklist. */
+export interface MachineUpdate {
+  ok: boolean
+  kind: "source" | "binary"
+  repo: string
+  branch: string
+  before: { commit: string; version?: string }
+  after?: { commit: string; version?: string }
+  commits: string[]
+  done: string[]
+  error?: string
+  hint?: string
+  restarted: boolean
+  hubVersion: string
+  steps: SetupStep[]
+  machine: Machine
+}
+
 /** A problem in a config file (servedev keeps using the last version that parsed). */
 export interface ConfigIssue {
   level: "error" | "warning"

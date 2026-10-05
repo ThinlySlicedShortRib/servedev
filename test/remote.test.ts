@@ -97,6 +97,8 @@ interface FakeOpts {
   /** Port of the fake remote API; forwards "land" there. */
   apiPort?: number;
   denied?: boolean;
+  /** Answers for other scripts (e.g. an update's); undefined falls through. */
+  scripts?: (script: string) => RunResult | undefined;
 }
 
 function fakeSsh(o: FakeOpts) {
@@ -120,6 +122,8 @@ function fakeSsh(o: FakeOpts) {
       const command = argv.at(-1)!;
       if (command === "echo %OS%") return { code: 0, stdout: o.windows ? "Windows_NT\r\n" : "%OS%\n", stderr: "" };
       const script = command.startsWith("wsl.exe") ? decodeWsl(command) : command;
+      const answer = o.scripts?.(script);
+      if (answer) return answer;
       if (script.includes("uname -s")) return { code: 0, stdout: o.windows ? "Linux\nUbuntu\nUbuntu 26.04 LTS\n" : "Darwin\n\n", stderr: "" };
       if (script.includes("@missing")) {
         if (o.servedev === "missing") return { code: 0, stdout: "@missing\n", stderr: "" };
@@ -185,7 +189,9 @@ function fakeRemote(
   });
   cleanups.push(() => srv.stop(true));
   const send = (event: string, data: unknown) => streams.forEach((c) => c.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)));
-  return { port: srv.port!, hosts, send, servers };
+  /** Its daemon going away: every event stream ends. */
+  const endStreams = () => streams.splice(0).forEach((c) => c.close());
+  return { port: srv.port!, hosts, send, endStreams, servers };
 }
 
 function memorySecrets(): SecretStore & { data: Map<string, string> } {
@@ -606,7 +612,7 @@ test("hub: folder listing on a machine, and a clear message when its servedev pr
   const old = hubWithRemote({ oldServedev: true });
   await expect(old.hub.dirs("pc", { path: "~" })).rejects.toMatchObject({
     status: 501,
-    message: "pc runs servedev 0.2.0, which can't list its folders (type the path instead); update it (this machine runs 0.3.0).",
+    message: "pc runs servedev 0.2.0, which can't list its folders (type the path instead); update it: servedev remote update pc (this machine runs 0.3.0).",
   });
 });
 
@@ -616,4 +622,76 @@ test("hub: nothing goes to a machine that isn't connected", async () => {
   await expect(hub.start({ machine: "pc", name: "web", dir: "~/code/app" })).rejects.toThrow(/offline/);
   await expect(hub.dirs("pc", {})).rejects.toThrow(/offline/);
   expect(asked).toEqual([]);
+});
+
+// ---------- updating a machine, other hubs, older servedev ----------
+
+const ran = (stdout: string): RunResult => ({ code: 0, stdout, stderr: "" });
+
+test("updating a machine: over its connection, riding out its daemon's restart, then reconnected with the checklist", async () => {
+  const did: string[] = [];
+  let remote: ReturnType<typeof fakeRemote> | undefined;
+  const { m, remote: r } = machine("pc", {
+    scripts: (s) => {
+      if (s.includes("@entry")) {
+        did.push("probe");
+        return ran("@path /home/me/.local/bin/servedev\n@real /home/me/.local/bin/servedev\n@version 0.2.0\n@bun /home/me/.bun/bin/bun\n@entry /mnt/c/sd/src/cli.ts\n@repo /mnt/c/sd\n@branch main\n@upstream origin/main\n@head 1111111111\n");
+      }
+      if (s.includes("@missing")) return undefined;
+      if (s.includes("git fetch")) return did.push("fetch"), ran("@behind 1\n@ahead 0\n");
+      if (s.includes("git pull")) return did.push("pull"), ran("@head 2222222222\n@commit 2222222 Fix things\n@file src/remote/hub.ts\n");
+      if (s.includes("servedev --version")) return ran("0.2.1\n");
+      if (s.includes("servedev daemon restart")) {
+        did.push("restart");
+        // The old daemon goes away: its event stream ends.
+        remote!.endStreams();
+        return ran("daemon 0.2.1 running (pid 43) at http://127.0.0.1:7777; log: x\n");
+      }
+      return undefined;
+    },
+  });
+  remote = r;
+  await m.connect();
+  await Bun.sleep(50);
+  const errors: (string | undefined)[] = [];
+  m.on("status", () => errors.push(m.status.lastError));
+  const { report, steps } = await m.update();
+  expect(did).toEqual(["probe", "fetch", "pull", "restart"]);
+  expect(report).toMatchObject({
+    ok: true,
+    kind: "source",
+    repo: "/mnt/c/sd",
+    before: { commit: "1111111", version: "0.2.0" },
+    after: { commit: "2222222", version: "0.2.1" },
+    commits: ["2222222 Fix things"],
+    restarted: true,
+  });
+  expect(steps.map((s) => s.status)).toEqual(["ok", "ok", "ok", "ok", "ok"]);
+  expect(m.status.state).toBe("connected");
+  // Its stream ending during the restart wasn't taken for a lost connection.
+  expect(errors.filter(Boolean)).toEqual([]);
+});
+
+test("updating a machine that isn't connected, or that refuses: nothing changes there", async () => {
+  const { m, ssh } = machine("pc", { scripts: (s) => (s.includes("@entry") ? ran("@path /usr/local/bin/servedev\n@real /usr/local/bin/servedev\n@version 0.2.0\n") : undefined) });
+  await expect(m.update()).rejects.toThrow(/connecting/);
+  await m.connect();
+  const before = ssh.calls.length;
+  await expect(m.update()).rejects.toMatchObject({ status: 409, message: expect.stringContaining("pc runs servedev from /usr/local/bin/servedev, so it can't be updated from here") });
+  // Only the look at how it's installed ran; it stays connected.
+  expect(ssh.calls.slice(before).filter((a) => !a.includes("-O")).length).toBe(1);
+  expect(m.status.state).toBe("connected");
+});
+
+test("a relayed request an older servedev doesn't have: says so, and how to update it", async () => {
+  const remote = fakeRemote();
+  const api = new RemoteApi(remote.port, 7777, "tok", { machine: "pc", version: () => "0.3.0" });
+  await expect(api.call("POST", "/api/command", { id: "demo:api" })).rejects.toMatchObject({
+    status: 501,
+    missingEndpoint: true,
+    message: "pc runs an older servedev (0.3.0) that can't do this yet (POST /api/command); update it: servedev remote update pc",
+  });
+  await expect(api.stream("/api/stream/multi?ids=x", new AbortController().signal)).rejects.toMatchObject({ status: 501, message: expect.stringContaining("servedev remote update pc") });
+  // Its other errors pass through as they are.
+  await expect(new RemoteApi(remote.port, 7777, "nope", { machine: "pc" }).call("GET", "/api/servers")).rejects.toMatchObject({ status: 401, message: "missing or invalid token" });
 });
