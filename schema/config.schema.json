@@ -89,6 +89,17 @@
                 }
               ]
             },
+            "stop": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "Runs first when the server is stopped or restarted, in its folder with its environment, e.g. \"docker compose down\". Anything still running afterwards gets SIGTERM, then SIGKILL."
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "cwd": {
               "anyOf": [
                 {

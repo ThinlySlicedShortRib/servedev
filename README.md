@@ -45,6 +45,8 @@ Readiness defaults to "the process group is listening on a TCP port". Alternativ
 
 A setup step (`--install`, `--setup "<cmd>"`, or `"setup"` in servedev.json) runs before the server in the same log and is repeated on restarts; if it fails, the server doesn't start.
 
+A stop command (`--stop "<cmd>"`, or `"stop"` in servedev.json) runs first when the server is stopped or restarted, in its folder with its environment, and its output goes to the server's log. Use it for servers that need more than a signal, e.g. `docker compose up` with `docker compose down` as the stop command. servedev waits up to 30s for it, then sends SIGTERM (and SIGKILL after 5s) to anything still running; if the stop command fails or times out, the log says so and the signals still follow.
+
 `--install` picks the package manager from declared intent first (`"packageManager"` in package.json, then `pnpm-workspace.yaml`), then the nearest lockfile, and runs the install at the workspace root, so a pnpm/npm/yarn/bun monorepo package installs the whole workspace rather than creating a stray `node_modules`. servedev also checks whether dependencies are current (pnpm: the lockfile against `node_modules/.pnpm/lock.yaml`; npm/yarn: lockfile vs. install-record timestamps; bun keeps no record). A detected dev script with no `node_modules` installs automatically; a stale install gets a note suggesting `--install`.
 
 Exit codes: `0` ready, `1` failed/crashed, `2` still starting after the timeout (left running).
@@ -127,6 +129,7 @@ This servedev becomes a hub: it keeps one SSH connection per machine and talks t
 {
   "servers": {
     "api": { "command": "bun run --watch src/server.ts", "setup": "bun install", "port": 4000, "ready": { "url": "/health" } },
+    "db": { "command": "docker compose up", "stop": "docker compose down", "port": 5432 },
     "web": { "command": "npm run dev", "cwd": "apps/web", "port": "auto", "dependsOn": ["api"] },
     "jobs": { "command": "npm run worker", "ready": "none", "env": { "QUEUE": "dev" } }
   }
@@ -145,7 +148,7 @@ servedev save api --dry-run   # show what would be written
 servedev save api             # add it (asks for --force before replacing a different entry)
 ```
 
-The dashboard has the same thing on a server's page ("Save to servedev.json", or "Update servedev.json" when the file has drifted). It writes the command, setup, folder (relative to the repo), port, ready check, hostname and the variables set on purpose; other servers and keys like `dependsOn` are kept. It never writes credentials: secret-looking variables are left out unless you pass `--include-secrets`, and credentials on the command line (`--token=…`, `ghp_…`, `sk_live_…`, passwords in URLs) are removed. Paths that only exist on this machine are made portable (`node /opt/homebrew/bin/pnpm dev` → `pnpm dev`, project paths become relative), and anything else machine-specific is pointed out.
+The dashboard has the same thing on a server's page ("Save to servedev.json", or "Update servedev.json" when the file has drifted). It writes the command, setup, stop command, folder (relative to the repo), port, ready check, hostname and the variables set on purpose; other servers and keys like `dependsOn` are kept. It never writes credentials: secret-looking variables are left out unless you pass `--include-secrets`, and credentials on the command line (`--token=…`, `ghp_…`, `sk_live_…`, passwords in URLs) are removed. Paths that only exist on this machine are made portable (`node /opt/homebrew/bin/pnpm dev` → `pnpm dev`, project paths become relative), and anything else machine-specific is pointed out.
 
 ### Environment
 

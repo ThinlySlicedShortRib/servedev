@@ -31,6 +31,7 @@ export interface StartArgs {
   name?: string;
   command?: string;
   setup?: string;
+  stop?: string;
   install?: boolean;
   hostname?: string;
   dir?: string;
@@ -162,6 +163,7 @@ export async function opStart(a: StartArgs): Promise<OpResult> {
       dir: a.folder ? remoteFolder(a.folder) : undefined,
       command: a.command,
       setup: a.setup,
+      stop: a.stop,
       install: a.install,
       hostname: a.hostname,
       cwd: a.dir ? remoteFolder(a.dir) : undefined,
@@ -183,6 +185,7 @@ export async function opStart(a: StartArgs): Promise<OpResult> {
     name: a.name,
     command: a.command,
     setup: a.setup,
+    stop: a.stop,
     install: a.install,
     hostname: a.hostname,
     cwd: a.dir,
@@ -375,6 +378,7 @@ export async function opStatus(a: { cwd: string; name?: string }): Promise<OpRes
     `  uptime:   ${active ? ago(s.startedAt) : `stopped ${ago(s.stoppedAt)} ago`}`,
     ...(s.setup ? [`  setup:    ${s.setup}`] : []),
     `  command:  ${s.command}`,
+    ...(s.stop ? [`  stop:     ${s.stop}`] : []),
     `  cwd:      ${s.cwd}`,
     ...(s.branch ? [`  branch:   ${s.branch}`] : []),
     ...(s.vars?.length ? [`  env:      ${s.vars.map((v) => `${v.name}=${v.preview}`).join(" ")} (set on purpose; the rest comes from your login shell)`] : []),
@@ -792,13 +796,20 @@ export async function opProfile(a: {
   }
 }
 
-export async function opEdit(a: { cwd: string; name: string; command?: string; setup?: string; restart?: boolean }): Promise<OpResult> {
-  if (a.command === undefined && a.setup === undefined) throw new Error("nothing to change: pass a command and/or a setup step");
-  const r = await api<{ server: PublicServer }>("/api/command", { root: findRoot(a.cwd), name: a.name, command: a.command, setup: a.setup });
+export async function opEdit(a: { cwd: string; name: string; command?: string; setup?: string; stop?: string; restart?: boolean }): Promise<OpResult> {
+  if (a.command === undefined && a.setup === undefined && a.stop === undefined) {
+    throw new Error("nothing to change: pass a command, a setup step and/or a stop command");
+  }
+  const r = await api<{ server: PublicServer }>("/api/command", { root: findRoot(a.cwd), name: a.name, command: a.command, setup: a.setup, stop: a.stop });
   const s = r.server;
-  const lines = [`${s.id} starts with: ${s.command}`, s.setup ? `setup: ${s.setup}` : "no setup step"];
+  const lines = [
+    `${s.id} starts with: ${s.command}`,
+    s.setup ? `setup: ${s.setup}` : "no setup step",
+    s.stop ? `stop: ${s.stop}` : "no stop command (stops with signals)",
+  ];
   if (a.restart && ["starting", "running"].includes(s.status)) return opRestart({ cwd: a.cwd, name: s.id });
-  if (["starting", "running"].includes(s.status)) lines.push("It's still running the old command; restart it to use the new one.");
+  // A new stop command applies to the running process already; the others wait for a restart.
+  if ((a.command !== undefined || a.setup !== undefined) && ["starting", "running"].includes(s.status)) lines.push("It's still running the old command; restart it to use the new one.");
   return { ok: true, text: lines.join("\n"), data: r };
 }
 

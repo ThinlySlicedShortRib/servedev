@@ -14,7 +14,7 @@ import { portableCommand } from "./sanitize";
  */
 
 /** Keys servedev manages for a server; others (timeout, dependsOn, anything newer) are left alone. */
-export const MANAGED = ["command", "setup", "cwd", "port", "hostname", "ready", "env"] as const;
+export const MANAGED = ["command", "setup", "stop", "cwd", "port", "hostname", "ready", "env"] as const;
 
 export type ConfigState = "defined" | "differs" | "missing";
 
@@ -52,15 +52,17 @@ export function readyToConfig(ready: ReadySpec | undefined): ServerConfig["ready
 
 /** The servedev.json entry that reproduces a server. */
 export function serverToConfig(
-  s: Pick<Server, "command" | "setup" | "root" | "cwd" | "portSpec" | "hostname" | "ready" | "env">,
+  s: Pick<Server, "command" | "setup" | "stop" | "root" | "cwd" | "portSpec" | "hostname" | "ready" | "env">,
   opts: { includeSecrets?: boolean; baseEnv?: Record<string, string>; which?: (bin: string) => string | null } = {},
 ): { entry: ServerConfig; omittedSecrets: string[]; removed: string[]; rewritten: string[]; warnings: string[] } {
   // Never write credentials from the command line, and don't pin paths that only exist here.
   const ctx = { root: s.root, cwd: s.cwd, which: opts.which };
   const command = portableCommand(s.command, ctx);
   const setup = s.setup ? portableCommand(s.setup, ctx) : undefined;
+  const stop = s.stop ? portableCommand(s.stop, ctx) : undefined;
   const entry: ServerConfig = { command: command.command };
   if (setup?.command) entry.setup = setup.command;
+  if (stop?.command) entry.stop = stop.command;
   const rel = path.relative(s.root, s.cwd);
   if (rel && rel !== ".") entry.cwd = rel;
   if (s.portSpec !== undefined) entry.port = s.portSpec;
@@ -77,9 +79,9 @@ export function serverToConfig(
   return {
     entry,
     omittedSecrets: omittedSecrets.sort(),
-    removed: [...command.removed, ...(setup?.removed ?? [])],
-    rewritten: [...command.rewritten, ...(setup?.rewritten ?? [])],
-    warnings: [...command.warnings, ...(setup?.warnings ?? [])],
+    removed: [...command.removed, ...(setup?.removed ?? []), ...(stop?.removed ?? [])],
+    rewritten: [...command.rewritten, ...(setup?.rewritten ?? []), ...(stop?.rewritten ?? [])],
+    warnings: [...command.warnings, ...(setup?.warnings ?? []), ...(stop?.warnings ?? [])],
   };
 }
 

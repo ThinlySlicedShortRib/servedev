@@ -92,6 +92,20 @@ test("resolve: repo servers, your changes on top, your own servers, pins", () =>
   expect(r.projects.get("app")).toMatchObject({ repo: "github.com/acme/app", branch: "main" });
 });
 
+test("resolve: a stop command from the repo, replaced or cleared in your config", () => {
+  const root = repo({
+    servers: { db: { command: "docker compose up", stop: "docker compose down" }, cache: { command: "redis-server", stop: "redis-cli shutdown" }, web: { command: "vite" } },
+  });
+  const s = store({
+    projects: { app: { path: root } },
+    servers: { app: { cache: { stop: null }, web: { stop: "pkill -f vite-helper" } } },
+  });
+  const r = resolveConfig(s);
+  expect(r.servers.get("app:db")?.stop).toBe("docker compose down");
+  expect(r.servers.get("app:cache")?.stop).toBeUndefined();
+  expect(r.servers.get("app:web")?.stop).toBe("pkill -f vite-helper");
+});
+
 test("resolve: shared profiles, your overrides (accounts, skipped servers, grid), local profiles", () => {
   const root = repo({
     servers: { api: { command: "a" }, web: { command: "w" }, db: { command: "d" } },
