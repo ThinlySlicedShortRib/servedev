@@ -424,7 +424,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
           <dd className="flex min-w-0 flex-wrap items-baseline gap-x-2">
             <span className="font-mono break-all studio:text-xs studio:leading-5">{command}</span>
             {s && (
-              <Hint label="Change the command, or the setup step that runs before it">
+              <Hint label="Change the command, the setup step that runs before it, or the stop command">
                 <Button variant="link" size="xs" className="h-auto px-0" disabled={down} onClick={() => setEditingCommand(true)}>
                   <PencilIcon data-icon="inline-start" />
                   Edit
@@ -436,6 +436,12 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
             <>
               <dt className="text-muted-foreground">Setup</dt>
               <dd className="font-mono break-all studio:text-xs studio:leading-5">{s.setup}</dd>
+            </>
+          )}
+          {s?.stop && (
+            <>
+              <dt className="text-muted-foreground">Stop</dt>
+              <dd className="font-mono break-all studio:text-xs studio:leading-5">{s.stop}</dd>
             </>
           )}
           {(s?.branch ?? entry.configured?.branch) && (

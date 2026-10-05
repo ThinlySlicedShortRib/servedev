@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { ACTIVE, api, type Server } from "@/lib/api"
 
-/** Change how a server starts: its command and the setup step that runs before it. */
+/** Change how a server starts and stops: its command, the setup step before it, and an optional stop command. */
 export function CommandDialog({
   server,
   open,
@@ -38,7 +38,7 @@ export function CommandDialog({
         <DialogHeader>
           <DialogTitle>Edit command</DialogTitle>
           <DialogDescription>
-            How {server.name} starts. It's kept in your config.json; if the
+            How {server.name} starts and stops. It's kept in your config.json; if the
             repo's servedev.json defines {server.name}, your change applies on
             top of it.
           </DialogDescription>
@@ -59,18 +59,21 @@ function CommandForm({
 }) {
   const [command, setCommand] = React.useState(server.command)
   const [setup, setSetup] = React.useState(server.setup ?? "")
+  const [stop, setStop] = React.useState(server.stop ?? "")
   const [saving, setSaving] = React.useState<"save" | "restart" | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const running = ACTIVE.includes(server.status)
 
-  const changed =
+  // A new stop command applies to the running process right away; the others on restart.
+  const startChanged =
     command.trim() !== server.command || setup.trim() !== (server.setup ?? "")
+  const changed = startChanged || stop.trim() !== (server.stop ?? "")
 
   async function submit(restart: boolean) {
     setSaving(restart ? "restart" : "save")
     setError(null)
     try {
-      await api("/api/command", { id: server.id, command, setup })
+      await api("/api/command", { id: server.id, command, setup, stop })
       if (restart) await api("/api/restart", { id: server.id, wait: false })
       toast.success(
         restart
@@ -78,7 +81,7 @@ function CommandForm({
           : `Saved ${server.name}'s command`,
         {
           description:
-            !restart && running
+            !restart && running && startChanged
               ? "It's still running the old one; restart to use it."
               : undefined,
         }
@@ -130,6 +133,22 @@ function CommandForm({
           <FieldDescription>
             Runs before the command on every start and restart. If it fails, the
             server doesn't start.
+          </FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="stop">Stop (optional)</FieldLabel>
+          <Input
+            id="stop"
+            value={stop}
+            onChange={(e) => setStop(e.target.value)}
+            placeholder="docker compose down"
+            className="font-mono"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <FieldDescription>
+            Runs first when the server stops or restarts, with output in its
+            log. Anything still running afterwards is stopped with signals.
           </FieldDescription>
         </Field>
         {error && (
