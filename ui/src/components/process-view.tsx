@@ -10,8 +10,14 @@ import { useStyleId } from "@/components/style-provider"
 /** Live process groups for a server; polls while `enabled`. */
 export function useProcessGroups(serverId: string | undefined, enabled: boolean, intervalMs = 2000) {
   const [groups, setGroups] = React.useState<ProcessGroup[] | null>(null)
-  React.useEffect(() => {
+  // Start over whenever what's polled changes.
+  const key = `${serverId}|${enabled}|${intervalMs}`
+  const [polled, setPolled] = React.useState(key)
+  if (polled !== key) {
+    setPolled(key)
     setGroups(null)
+  }
+  React.useEffect(() => {
     if (!serverId || !enabled) return
     let cancelled = false
     const load = () =>

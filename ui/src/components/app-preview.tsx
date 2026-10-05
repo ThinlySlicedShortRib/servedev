@@ -12,8 +12,12 @@ const frameChecks = new Map<string, Promise<FrameCheck>>()
 /** Ask the daemon whether the app allows being framed, before showing it (cached per URL for a minute). */
 function useFrameCheck(url: string | undefined): FrameCheck | null {
   const [result, setResult] = React.useState<FrameCheck | null>(null)
-  React.useEffect(() => {
+  const [checked, setChecked] = React.useState(url)
+  if (checked !== url) {
+    setChecked(url)
     setResult(null)
+  }
+  React.useEffect(() => {
     if (!url) return
     let cancelled = false
     if (!frameChecks.has(url)) {
