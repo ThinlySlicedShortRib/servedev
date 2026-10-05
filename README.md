@@ -37,6 +37,7 @@ servedev runs web                       # run history: started, ended, ready tim
 servedev logs web --run 12              # an earlier run's log
 servedev config log_retention_days 14   # keep logs longer (default 7)
 servedev restart web
+servedev edit web -- pnpm dev --host    # change its command (also --setup, --stop; --restart to apply now)
 servedev down                           # stop everything in this project
 servedev ui                             # open the dashboard (http://servedev.localhost)
 ```
@@ -46,6 +47,8 @@ Readiness defaults to "the process group is listening on a TCP port". Alternativ
 A setup step (`--install`, `--setup "<cmd>"`, or `"setup"` in servedev.json) runs before the server in the same log and is repeated on restarts; if it fails, the server doesn't start.
 
 A stop command (`--stop "<cmd>"`, or `"stop"` in servedev.json) runs first when the server is stopped or restarted, in its folder with its environment, and its output goes to the server's log. Use it for servers that need more than a signal, e.g. `docker compose up` with `docker compose down` as the stop command. servedev waits up to 30s for it, then sends SIGTERM (and SIGKILL after 5s) to anything still running; if the stop command fails or times out, the log says so and the signals still follow.
+
+`servedev edit <name>` changes a server's command (`-- <command...>`), setup (`--setup`) or stop command (`--stop`; `""` removes either) without starting it; `--restart` restarts it if it's running. The dashboard's **Edit** next to the command and the `edit_server` MCP tool do the same.
 
 `--install` picks the package manager from declared intent first (`"packageManager"` in package.json, then `pnpm-workspace.yaml`), then the nearest lockfile, and runs the install at the workspace root, so a pnpm/npm/yarn/bun monorepo package installs the whole workspace rather than creating a stray `node_modules`. servedev also checks whether dependencies are current (pnpm: the lockfile against `node_modules/.pnpm/lock.yaml`; npm/yarn: lockfile vs. install-record timestamps; bun keeps no record). A detected dev script with no `node_modules` installs automatically; a stale install gets a note suggesting `--install`.
 
