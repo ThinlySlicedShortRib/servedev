@@ -138,12 +138,13 @@ export function AppSidebar({
   const changeStatus = filter.setStatus
 
   // "/" focuses search from anywhere outside a text field.
+  const onSlash = React.useEffectEvent(focusSearch)
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
       if (e.key !== "/" || e.metaKey || e.ctrlKey || t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return
       e.preventDefault()
-      focusSearch()
+      onSlash()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)

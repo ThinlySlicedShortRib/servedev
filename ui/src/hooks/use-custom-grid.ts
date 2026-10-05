@@ -66,7 +66,6 @@ export function useCustomGrid(profile: Profile | undefined, externalChange?: { s
       cancelled = true
     }
     // The profile's membership is merged below; only the scope (or an outside change) reloads.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, reloadKey])
 
   // The profile was edited elsewhere (profile dialog, CLI, an agent): apply what changed, so a

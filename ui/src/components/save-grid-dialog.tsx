@@ -20,34 +20,8 @@ export function SaveGridDialog({
   items: LayoutItem[]
   onSaved: (p: Profile) => void
 }) {
-  const [name, setName] = React.useState("")
-  const [saving, setSaving] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    if (open) {
-      setName("")
-      setError(null)
-    }
-  }, [open])
-
   // Tiles of servers on other machines ("pc/..." ids) go along: each starts on its own machine.
   const machines = [...new Set(items.flatMap((it) => (it.i.includes("/") ? [it.i.slice(0, it.i.indexOf("/"))] : [])))]
-
-  async function save(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true)
-    setError(null)
-    try {
-      const { profile } = await api<{ profile: Profile }>("/api/profiles", { name: name.trim(), layout: items, source: CLIENT_ID })
-      onSaved(profile)
-      onOpenChange(false)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -61,28 +35,54 @@ export function SaveGridDialog({
               ` Servers on ${machines.join(" and ")} stay on ${machines.length === 1 ? "that machine" : "their machines"}: starting the profile starts each one there.`}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={save} className="flex flex-col gap-6">
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="grid-profile-name">Name</FieldLabel>
-              <Input id="grid-profile-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Keel + Capcon review" autoFocus />
-              <FieldDescription>Servers start in reading order: top row first, left to right.</FieldDescription>
-            </Field>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-          </FieldGroup>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit" disabled={!name.trim() || saving || items.length === 0}>
-              {saving && <Spinner data-icon="inline-start" />}
-              Save profile
-            </Button>
-          </DialogFooter>
-        </form>
+        {/* Mounted only while open, so each opening starts with an empty name. */}
+        <SaveGridForm items={items} onSaved={onSaved} onDone={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
+  )
+}
+
+function SaveGridForm({ items, onSaved, onDone }: { items: LayoutItem[]; onSaved: (p: Profile) => void; onDone: () => void }) {
+  const [name, setName] = React.useState("")
+  const [saving, setSaving] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    try {
+      const { profile } = await api<{ profile: Profile }>("/api/profiles", { name: name.trim(), layout: items, source: CLIENT_ID })
+      onSaved(profile)
+      onDone()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="flex flex-col gap-6">
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="grid-profile-name">Name</FieldLabel>
+          <Input id="grid-profile-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Keel + Capcon review" autoFocus />
+          <FieldDescription>Servers start in reading order: top row first, left to right.</FieldDescription>
+        </Field>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+      </FieldGroup>
+      <DialogFooter>
+        <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+        <Button type="submit" disabled={!name.trim() || saving || items.length === 0}>
+          {saving && <Spinner data-icon="inline-start" />}
+          Save profile
+        </Button>
+      </DialogFooter>
+    </form>
   )
 }

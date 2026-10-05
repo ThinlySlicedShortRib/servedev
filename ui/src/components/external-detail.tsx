@@ -190,17 +190,34 @@ function TakeOverDialog({
   server: ExternalServer
   onDone: (id: string) => void
 }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Take over {x.suggestedName}</DialogTitle>
+          <DialogDescription>
+            servedev stops the running process (pid {x.pid}, {x.ports.map((p) => `:${p}`).join(", ")}) and starts this command in{" "}
+            {tildify(x.cwd)}. It's down for a moment while it restarts.
+          </DialogDescription>
+        </DialogHeader>
+        {/* Mounted only while open, so each opening starts from the suggested name and command. */}
+        <TakeOverForm
+          server={x}
+          onDone={(id) => {
+            onOpenChange(false)
+            onDone(id)
+          }}
+        />
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function TakeOverForm({ server: x, onDone }: { server: ExternalServer; onDone: (id: string) => void }) {
   const [name, setName] = React.useState(x.suggestedName)
   const [command, setCommand] = React.useState(x.command)
   const [saving, setSaving] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    if (!open) return
-    setName(x.suggestedName)
-    setCommand(x.command)
-    setError(null)
-  }, [open, x.suggestedName, x.command])
 
   const nameValid = /^[\w.-]+$/.test(name)
 
@@ -216,7 +233,6 @@ function TakeOverDialog({
       })
       if (r.ready && !r.ready.ok) toast.error(`${name} didn't come back up`, { description: `${r.ready.reason}. Its logs are in servedev now.` })
       else toast.success(`servedev now manages ${name}`, { description: r.server.url ? `Running at ${r.server.url}` : undefined })
-      onOpenChange(false)
       onDone(r.server.id)
     } catch (err) {
       setError((err as Error).message)
@@ -226,45 +242,34 @@ function TakeOverDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Take over {x.suggestedName}</DialogTitle>
-          <DialogDescription>
-            servedev stops the running process (pid {x.pid}, {x.ports.map((p) => `:${p}`).join(", ")}) and starts this command in{" "}
-            {tildify(x.cwd)}. It's down for a moment while it restarts.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit} className="flex flex-col gap-6">
-          <FieldGroup>
-            <Field data-invalid={!nameValid ? true : undefined}>
-              <FieldLabel htmlFor="takeover-name">Name</FieldLabel>
-              <Input id="takeover-name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!nameValid ? true : undefined} />
-              {!nameValid && <FieldError>Use letters, digits, dots, dashes or underscores.</FieldError>}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="takeover-command">Command</FieldLabel>
-              <Textarea id="takeover-command" value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono text-xs" rows={3} />
-              <FieldDescription>
-                This is how it was started. It keeps port {x.ports.find((p) => p < 10000) ?? x.ports[0]}, and runs with servedev's environment
-                variables rather than the original terminal's; settings in .env files still apply.
-              </FieldDescription>
-            </Field>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-          </FieldGroup>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
-            <Button type="submit" disabled={!nameValid || !command.trim() || saving}>
-              {saving && <Spinner data-icon="inline-start" />}
-              {saving ? "Taking over…" : "Stop and take over"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <form onSubmit={submit} className="flex flex-col gap-6">
+      <FieldGroup>
+        <Field data-invalid={!nameValid ? true : undefined}>
+          <FieldLabel htmlFor="takeover-name">Name</FieldLabel>
+          <Input id="takeover-name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!nameValid ? true : undefined} />
+          {!nameValid && <FieldError>Use letters, digits, dots, dashes or underscores.</FieldError>}
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="takeover-command">Command</FieldLabel>
+          <Textarea id="takeover-command" value={command} onChange={(e) => setCommand(e.target.value)} className="font-mono text-xs" rows={3} />
+          <FieldDescription>
+            This is how it was started. It keeps port {x.ports.find((p) => p < 10000) ?? x.ports[0]}, and runs with servedev's environment
+            variables rather than the original terminal's; settings in .env files still apply.
+          </FieldDescription>
+        </Field>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+      </FieldGroup>
+      <DialogFooter>
+        <DialogClose render={<Button type="button" variant="outline" />}>Cancel</DialogClose>
+        <Button type="submit" disabled={!nameValid || !command.trim() || saving}>
+          {saving && <Spinner data-icon="inline-start" />}
+          {saving ? "Taking over…" : "Stop and take over"}
+        </Button>
+      </DialogFooter>
+    </form>
   )
 }

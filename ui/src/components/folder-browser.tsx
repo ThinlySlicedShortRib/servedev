@@ -45,11 +45,17 @@ export function FolderBrowser({
   const [listing, setListing] = React.useState<DirListing | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  // Another folder (or machine, or showing hidden ones) loads afresh.
+  const want = `${machine ?? ""}|${hidden}|${path}`
+  const [requested, setRequested] = React.useState(want)
+  if (requested !== want) {
+    setRequested(want)
+    setLoading(true)
+    setError(null)
+  }
 
   React.useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
     const q = new URLSearchParams({ path, ...(machine ? { machine } : {}), ...(hidden ? { hidden: "1" } : {}) })
     api<DirListing>(`/api/dirs?${q}`)
       .then((r) => {

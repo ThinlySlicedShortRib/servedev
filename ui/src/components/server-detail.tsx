@@ -80,10 +80,12 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
   const down = !!s?.machine && (s.stale || (!!machine && machine.state !== "connected"))
   const locked = !!busy || down
   const href = down ? undefined : openUrl(s)
-  // Processes and Preview need the machine; fall back to the logs tab while it's away.
-  React.useEffect(() => {
+  // Processes and Preview need the machine; fall back to the logs tab when it goes away.
+  const [wasDown, setWasDown] = React.useState(down)
+  if (down !== wasDown) {
+    setWasDown(down)
     if (down) setTab("logs")
-  }, [down])
+  }
   const remotePort = s?.machine ? remotePortOf(s) : undefined
   const localPort = s?.machine ? localPortOf(s) : undefined
   const groups = useProcessGroups(

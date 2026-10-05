@@ -62,10 +62,16 @@ export function LogView({
     }
   }, [serverId, runId, status])
 
+  // A different past run (or back to the live log) loads from scratch.
+  const pastKey = serverId && viewingPast ? `${serverId}|${choice}` : ""
+  const [loadedPast, setLoadedPast] = React.useState(pastKey)
+  if (loadedPast !== pastKey) {
+    setLoadedPast(pastKey)
+    if (pastKey) setPast(null)
+  }
   React.useEffect(() => {
     if (!serverId || !viewingPast) return
     let cancelled = false
-    setPast(null)
     api<{ lines: string[]; purged: boolean }>(
       `/api/logs?${new URLSearchParams({ id: serverId, run: choice, tail: "all", maxChars: "2000000" })}`
     )

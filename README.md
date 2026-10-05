@@ -41,7 +41,7 @@ servedev down                           # stop everything in this project
 servedev ui                             # open the dashboard (http://servedev.localhost)
 ```
 
-Readiness defaults to "the process group is listening on a TCP port". Alternatives: `--ready-log <regex>`, `--ready-url /health`, `--ready none`. `--port auto|N` exports `$PORT` and fills `{port}` in the command; for detected Vite/Next/Astro/etc. scripts it also passes `--port`.
+Readiness defaults to "the process group is listening on a TCP port". Alternatives: `--ready-log <regex>`, `--ready-url /health`, `--ready none`. `--port auto|N` exports `$PORT` and fills `{port}` in the command; for detected Vite/Next/Astro/etc. scripts it also passes `--port`. A server's URL uses the port you declared (`--port N`, or the port in an absolute `--ready-url`) once it listens there; otherwise the first URL it prints, then its lowest port.
 
 A setup step (`--install`, `--setup "<cmd>"`, or `"setup"` in servedev.json) runs before the server in the same log and is repeated on restarts; if it fails, the server doesn't start.
 

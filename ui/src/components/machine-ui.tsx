@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 /**
  * Other machines in the sidebar and elsewhere: machine headers that group the server list,
  * their marker in the icon rail, a small tag for tiles, and state dots/badges.
