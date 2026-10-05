@@ -86,7 +86,6 @@ export function App() {
     api<{ id: string }>(`/api/profiles/resolve?${new URLSearchParams({ ref: profileId })}`)
       .then((r) => switchProfile(r.id))
       .catch(() => switchProfile(null))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, connected])
   const [view, setViewState] = React.useState<View>(loadView)
   const setView = (v: View) => {
