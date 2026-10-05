@@ -161,6 +161,8 @@ function fakeRemote(
   extra?: (req: Request, url: URL) => Response | undefined | Promise<Response | undefined>,
 ) {
   const hosts: string[] = [];
+  /** "<path> <x-servedev-hub>" for every request. */
+  const hubHeaders: string[] = [];
   const streams: ReadableStreamDefaultController[] = [];
   const srv = Bun.serve({
     port: 0,
@@ -168,6 +170,7 @@ function fakeRemote(
     idleTimeout: 0,
     async fetch(req) {
       hosts.push(req.headers.get("host") ?? "");
+      hubHeaders.push(`${new URL(req.url).pathname} ${req.headers.get("x-servedev-hub")}`);
       if (req.headers.get("host") !== "127.0.0.1:7777") return new Response("forbidden host", { status: 403 });
       const p = new URL(req.url).pathname;
       if (p === "/api/health") return Response.json({ ok: true, version: "0.2.0", pid: 42 });
@@ -191,7 +194,7 @@ function fakeRemote(
   const send = (event: string, data: unknown) => streams.forEach((c) => c.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)));
   /** Its daemon going away: every event stream ends. */
   const endStreams = () => streams.splice(0).forEach((c) => c.close());
-  return { port: srv.port!, hosts, send, endStreams, servers };
+  return { port: srv.port!, hosts, hubHeaders, send, endStreams, servers };
 }
 
 function memorySecrets(): SecretStore & { data: Map<string, string> } {
@@ -209,12 +212,12 @@ function fakePorts(apiPort: number, reserved: Set<number>, opts: { busy?: number
   };
 }
 
-function machine(name: string, o: FakeOpts & { secrets?: SecretStore; ports?: PortProbe } = {}) {
-  const remote = fakeRemote(o.token ?? "tok");
+function machine(name: string, o: FakeOpts & { secrets?: SecretStore; ports?: PortProbe; extra?: Parameters<typeof fakeRemote>[2]; hubName?: string } = {}) {
+  const remote = fakeRemote(o.token ?? "tok", undefined, o.extra);
   const ssh = fakeSsh({ servedev: "ok", ...o });
   const secrets = o.secrets ?? memorySecrets();
   const reserved = new Set<number>();
-  const m = new Machine(name, { ssh: "me@pc" }, { dir: tmp(), secrets, hubVersion: "0.2.0", reserved, spawner: ssh.spawner, ports: o.ports ?? fakePorts(remote.port, reserved) });
+  const m = new Machine(name, { ssh: "me@pc" }, { dir: tmp(), secrets, hubVersion: "0.2.0", hubName: o.hubName, reserved, spawner: ssh.spawner, ports: o.ports ?? fakePorts(remote.port, reserved) });
   cleanups.push(() => m.dispose());
   return { m, ssh, remote, secrets };
 }
@@ -681,6 +684,36 @@ test("updating a machine that isn't connected, or that refuses: nothing changes 
   // Only the look at how it's installed ran; it stays connected.
   expect(ssh.calls.slice(before).filter((a) => !a.includes("-O")).length).toBe(1);
   expect(m.status.state).toBe("connected");
+});
+
+test("another hub connected to the machine: named in the checklist, kept up to date from its events; an older servedev means no warning", async () => {
+  const { m, remote } = machine("pc", {
+    hubName: "me",
+    extra: (_req, url) => (url.pathname === "/api/hubs" ? Response.json({ hubs: [{ name: "me", since: 1 }, { name: "mini", since: 2 }] }) : undefined),
+  });
+  const steps = await m.connect();
+  const api = steps.find((s) => s.id === "api")!;
+  expect(api.status).toBe("warning");
+  expect(api.detail).toContain("another hub, mini, is connected to pc too");
+  expect(api.hint).toContain("servedev remote rm pc");
+  expect(m.otherHubs).toEqual(["mini"]);
+  await Bun.sleep(50);
+  // This hub names itself on its requests and on its event stream.
+  expect(remote.hubHeaders).toContain("/api/stream/events me");
+  expect(remote.hubHeaders).toContain("/api/servers me");
+  let changes = 0;
+  m.on("status", () => changes++);
+  remote.send("hubs", [{ name: "me", since: 1 }]);
+  await Bun.sleep(50);
+  expect(m.otherHubs).toEqual([]);
+  remote.send("hubs", [{ name: "me", since: 1 }]);
+  await Bun.sleep(20);
+  expect(changes).toBe(1);
+
+  const old = machine("old", { hubName: "me" });
+  const oldSteps = await old.m.connect();
+  expect(oldSteps.find((s) => s.id === "api")?.status).toBe("ok");
+  expect(old.m.otherHubs).toEqual([]);
 });
 
 test("a relayed request an older servedev doesn't have: says so, and how to update it", async () => {

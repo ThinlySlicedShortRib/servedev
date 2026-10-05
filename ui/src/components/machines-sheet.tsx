@@ -370,6 +370,28 @@ function MachineCard({
           </>
         )}
       </dl>
+      {up && !!m.otherHubs?.length && (
+        <div className={cn("ml-11 flex flex-col gap-1.5 p-2.5 text-xs", box)} role="status">
+          <p className="flex items-start gap-1.5">
+            <TriangleAlertIcon className={cn("mt-px size-3.5 shrink-0", warnText)} />
+            <span className="min-w-0 break-words">
+              {m.otherHubs.length === 1 ? (
+                <>
+                  Another hub, <span className="font-medium">{m.otherHubs[0]}</span>, is connected to {m.name} too.
+                </>
+              ) : (
+                <>
+                  Other hubs (<span className="font-medium">{m.otherHubs.join(", ")}</span>) are connected to {m.name} too.
+                </>
+              )}
+            </span>
+          </p>
+          <p className="text-muted-foreground">
+            Each forwards its servers' ports, so here some may have other port numbers than on {m.name}. Remove {m.name} on the other one if you don't
+            need both.
+          </p>
+        </div>
+      )}
       {!up && (m.lastError || m.state === "offline") && (
         <div className={cn("ml-11 flex flex-col gap-1.5 p-2.5 text-xs", box)}>
           <p className="flex items-start gap-1.5">

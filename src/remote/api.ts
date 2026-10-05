@@ -15,6 +15,9 @@ export class RemoteApiError extends Error {
   }
 }
 
+/** Header naming the hub, so the machine knows which hubs are connected to it. */
+export const HUB_HEADER = "x-servedev-hub";
+
 /** A servedev's answer to an endpoint it doesn't have: "not found: POST /api/command". */
 export function isNotFound(status: number, message: string): boolean {
   return status === 404 && /^not found: (GET|POST) \/api\//.test(message);
@@ -25,6 +28,8 @@ export interface RemoteApiOptions {
   machine?: string;
   /** Its servedev version as last seen, for errors. */
   version?: () => string | undefined;
+  /** This hub's name, sent with every request. */
+  hub?: string;
 }
 
 export class RemoteApi {
@@ -38,7 +43,12 @@ export class RemoteApi {
   ) {}
 
   private headers(json: boolean): Record<string, string> {
-    return { host: `127.0.0.1:${this.remotePort}`, "x-servedev-token": this.token, ...(json ? { "content-type": "application/json" } : {}) };
+    return {
+      host: `127.0.0.1:${this.remotePort}`,
+      "x-servedev-token": this.token,
+      ...(this.opts.hub ? { [HUB_HEADER]: this.opts.hub } : {}),
+      ...(json ? { "content-type": "application/json" } : {}),
+    };
   }
 
   url(path: string): string {

@@ -192,6 +192,7 @@ export class RemoteHub extends EventEmitter {
       version: m.version,
       hubVersion: this.deps.hubVersion,
       versionMismatch: !!m.version && m.version !== this.deps.hubVersion,
+      otherHubs: m.otherHubs,
       remotePort: m.remotePort,
       apiPort: m.apiPort,
       counts: {

@@ -83,6 +83,8 @@ export interface Machine {
   version?: string
   hubVersion: string
   versionMismatch: boolean
+  /** Other hubs connected to it too, forwarding its ports as well (missing from older versions). */
+  otherHubs?: string[]
   remotePort?: number
   apiPort?: number
   counts: { total: number; running: number; crashed: number }

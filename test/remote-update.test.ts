@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { HubTracker, cleanHubName, hubName, otherHubs, otherHubsWarning } from "../src/remote/hubs";
 import type { Transport } from "../src/remote/transport";
 import { INSTALL_PROBE, compareVersions, parseInstall, refusal, updateServedev } from "../src/remote/update";
 
@@ -13,6 +14,8 @@ const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
 
 const BUN = process.execPath;
+/** These run git (and bun) for real. */
+const SLOW = 30_000;
 
 function sh(cwd: string, ...argv: string[]) {
   const p = Bun.spawnSync(argv, { cwd, env: gitEnv(cwd) });
@@ -114,7 +117,7 @@ for (const shell of ["/bin/bash", "/bin/zsh"].filter((s) => fs.existsSync(s))) {
     expect(i).toMatchObject({ missing: false, kind: "source", entry: `${work}/src/cli.ts`, repo: work, branch: "main", upstream: "origin/main", dirty: [], bun: BUN, version: "1.0.0" });
     expect(i.head).toMatch(/^[0-9a-f]{40}$/);
     expect(refusal("pc", i)).toBeUndefined();
-  });
+  }, SLOW);
 
   test(`updating a checkout run from source (${path.basename(shell)}): pull, install when the lockfile changed, restart`, async () => {
     const { work, push, env, restarts } = setup("source");
@@ -132,7 +135,7 @@ for (const shell of ["/bin/bash", "/bin/zsh"].filter((s) => fs.existsSync(s))) {
     ]);
     // The daemon was restarted with the new code.
     expect(restarts()).toEqual(["1.1.0"]);
-  });
+  }, SLOW);
 }
 
 test("updating a compiled binary in a checkout: pull, build, restart; up to date and built: just restart", async () => {
@@ -148,7 +151,7 @@ test("updating a compiled binary in a checkout: pull, build, restart; up to date
   const again = await updateServedev(t, "mac", "1.2.0");
   expect(again.done).toEqual([`already up to date with origin/main (${again.before.commit})`, "restarted its daemon (servers keep running)"]);
   expect(again.commits).toEqual([]);
-});
+}, SLOW);
 
 test("refused before anything changes: uncommitted changes, no branch, no upstream, diverged, not a checkout", async () => {
   const dirty = setup("source");
@@ -183,7 +186,7 @@ test("refused before anything changes: uncommitted changes, no branch, no upstre
   await expect(updateServedev(localTransport(other.env), "pc", "1.0.0")).rejects.toThrow(
     `pc runs servedev from ${other.root}/bin/servedev, so it can't be updated from here (only a git checkout run from source or built with bun run build can). Update it on pc the way it was installed, then run servedev daemon restart there and servedev remote reconnect pc here.`,
   );
-});
+}, SLOW);
 
 test("a failed pull changes nothing; a failed build stops before the restart, saying so", async () => {
   const fake = (answers: Record<string, string | { code: number; stdout?: string }>): Transport => ({
@@ -218,4 +221,39 @@ test("versions compare by number", () => {
   expect(compareVersions("0.10.0", "0.9.1")).toBeGreaterThan(0);
   expect(compareVersions("0.3.0", "0.3.0")).toBe(0);
   expect(compareVersions("0.3.0", "0.3.1")).toBeLessThan(0);
+});
+
+// ---------- hubs connected to a machine ----------
+
+test("hubs: open streams counted per hub; a change only when one comes or goes", () => {
+  let t = 1000;
+  const hubs = new HubTracker(() => t);
+  const changes: unknown[] = [];
+  hubs.on("change", (l) => changes.push(l));
+  const a1 = hubs.connect("mac");
+  t = 2000;
+  const a2 = hubs.connect("mac");
+  const b = hubs.connect("mini");
+  expect(hubs.list()).toEqual([
+    { name: "mac", since: 1000 },
+    { name: "mini", since: 2000 },
+  ]);
+  a1();
+  a1();
+  expect(hubs.list().map((h) => h.name)).toEqual(["mac", "mini"]);
+  a2();
+  b();
+  expect(hubs.list()).toEqual([]);
+  expect(changes.length).toBe(4);
+});
+
+test("hubs: names, the others in a machine's list, and the warning", () => {
+  expect(hubName("Seans-MacBook-Pro.local")).toBe("Seans-MacBook-Pro");
+  expect(cleanHubName("mac <script>")).toBe("macscript");
+  expect(cleanHubName("")).toBeUndefined();
+  expect(otherHubs([{ name: "mac", since: 1 }, { name: "mini", since: 2 }, "junk"], "mac")).toEqual(["mini"]);
+  expect(otherHubs(undefined, "mac")).toEqual([]);
+  expect(otherHubsWarning("pc", [])).toBeUndefined();
+  expect(otherHubsWarning("pc", ["mini"])).toBe("another hub, mini, is connected to pc too: each forwards its servers' ports, so some may have other port numbers here");
+  expect(otherHubsWarning("pc", ["a", "b"])).toStartWith("other hubs (a, b) are connected to pc too");
 });

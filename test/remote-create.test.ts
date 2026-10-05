@@ -311,6 +311,7 @@ const summary = {
   version: "0.3.1",
   hubVersion: "0.3.1",
   versionMismatch: false,
+  otherHubs: [],
   counts: { total: 2, running: 1, crashed: 0 },
   forwards: [],
 };
@@ -336,6 +337,11 @@ test("CLI: remote update reports what was done, commits and versions, then the r
   expect(r.out).toContain("  2222222 Fix things");
   expect(r.out).toContain("Commit: 1111111 → 2222222. servedev on pc: 0.3.0 → 0.3.1; this machine runs 0.3.1.");
   expect(r.out).toContain("  ✓ SSH connection: connected to me@pc");
+});
+
+test("CLI: remote ls names another hub connected to a machine", async () => {
+  const r = await cli(["remote", "ls"], () => ({ machines: [{ ...summary, otherHubs: ["mini"] }], hubVersion: "0.3.1" }));
+  expect(r.out).toContain("⚠ another hub, mini, is connected to pc too");
 });
 
 test("MCP: update_machine takes the machine", () => {

@@ -33,6 +33,8 @@ Connection states: **connecting** (first try), **connected**, **reconnecting** (
 
 A different servedev version on the machine is reported (in the checklist and `remote ls`), not fixed on its own: update one side so they match (`servedev remote update pc` for the machine, below).
 
+**Two hubs, one machine.** Each hub names itself (its hostname, in an `x-servedev-hub` header) on its requests and its live event stream, and the machine's servedev keeps track of which hubs have a stream open. When another hub is connected to the same machine, both forward its servers' ports, so on the second one some get other port numbers; the checklist, `remote ls` and the Machines sheet then warn and name the other hub. An older servedev on the machine doesn't keep track, so there's no warning.
+
 ### Where things are kept
 
 | What | Where |
@@ -124,7 +126,7 @@ The task is a logon task named `servedev-wsl` that runs `conhost.exe --headless 
 
 Once a machine is added, the sidebar groups servers by machine: this one first, then each other machine with its own projects. A machine's header shows its state, how many of its servers run (and crashed), and folds its servers away; while it's reconnecting or offline a second line says so, with **Retry**. A remote server's row shows the port it has on its machine; the link opens it here (at `<server>.<machine>.localhost`, or the forwarded port). An offline machine's servers stay in the list, dimmed, with their last known state, and count in the status filters that way.
 
-**Machines** (next to Accounts) lists the machines: state, system, address, servedev version, servers and forwarded ports, with Reconnect now, Show only its servers, Copy SSH command, Update servedev, Start with Windows (the boot task below) and Remove. When its version differs from this machine's, an **Update** button sits next to it; the update dialog shows what was done, the new commits, versions before and after, and the reconnect checklist. **Add machine** there runs the same checklist as `remote add`.
+**Machines** (next to Accounts) lists the machines: state, system, address, servedev version, servers and forwarded ports, with Reconnect now, Show only its servers, Copy SSH command, Update servedev, Start with Windows (the boot task below) and Remove. When its version differs from this machine's, an **Update** button sits next to it; the update dialog shows what was done, the new commits, versions before and after, and the reconnect checklist. A machine another hub is connected to as well gets a warning naming that hub. **Add machine** there runs the same checklist as `remote add`.
 
 A remote server's page says which machine it's on, where its address here leads (`→ pc:3000`, and the local port when that one was busy here), and pauses its actions while the machine isn't connected. Remote servers can go on any custom grid of yours (with a small machine tag).
 
@@ -143,6 +145,7 @@ All under the hub's token, like the rest of the API.
 | `POST /api/machines/remove` `{ name }` | `{ removed }` |
 | `POST /api/machines/boot` `{ name, install? }` | `{ supported, script, powershell, installed?, note? }` |
 | `POST /api/machines/update` `{ name }` | `{ ok, kind, repo, branch, before, after, commits, done, error?, hint?, restarted, hubVersion, steps, machine }`; 409 when refused (nothing changed there) |
+| `GET /api/hubs` | On a machine: the hubs with an event stream open here, `{ hubs: [{ name, since }] }` (also in the event stream's snapshot as `hubs`, and a `hubs` event when it changes). A MachineSummary's `otherHubs` lists the other ones. |
 | `GET /api/stream/events` | The snapshot has `machines`; remote servers arrive as `server` / `remove` events with `pc/` ids; `machine` (a MachineSummary) when a machine's state or forwards change; `machine-removed` `{ name }`; `profiles` again when a machine's servers, shared profiles or state change what profiles show |
 | `GET /api/profiles` | Yours (members on another machine as `pc/` ids, with `unavailable`: the ones whose machine isn't connected) and this machine's shared ones, then each machine's shared ones (`machine`, `pc/` ids) |
 | `POST /api/profiles/start`, `POST /api/servers/start` `{ ids, profile }` | In order across machines; results may have `machine`, `skipped` (machine not connected) and `note` (e.g. which accounts a remote server used) |

@@ -1,6 +1,7 @@
 /** `servedev remote ...`: adding, listing and repairing other machines (for the CLI and agents). */
 import { api } from "../client";
 import { ago, table, type OpResult } from "../ops";
+import { otherHubsWarning } from "./hubs";
 import type { MachineSummary, SetupStep } from "./types";
 import { compareVersions, type UpdateReport } from "./update";
 
@@ -56,6 +57,7 @@ export async function opRemoteList(): Promise<OpResult> {
   }
   const notes = r.machines.flatMap((m) => [
     ...(m.versionMismatch ? [`${m.name} runs servedev ${m.version}; this machine runs ${m.hubVersion}. Update one so they match (on ${m.name}: servedev remote update ${m.name}).`] : []),
+    ...(m.otherHubs?.length ? [`⚠ ${otherHubsWarning(m.name, m.otherHubs)}.`] : []),
     ...(m.state !== "connected" && m.lastError ? [`${m.name}: ${m.lastError}${m.hint ? `\n  fix: ${m.hint}` : ""}${m.nextRetryAt ? `\n  ${m.nextRetryAt > Date.now() ? `next try in ${Math.round((m.nextRetryAt - Date.now()) / 1000)}s` : "trying now"} (or now: servedev remote reconnect ${m.name})` : ""}`] : []),
   ]);
   return { ok: true, text: table(rows) + (notes.length ? `\n\n${notes.join("\n")}` : ""), data: r };

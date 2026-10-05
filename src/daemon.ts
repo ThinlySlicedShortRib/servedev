@@ -44,6 +44,8 @@ import { refsThere, remoteProfileView, withRemoteMembers } from "./remote/profil
 import { listDirs } from "./dirs";
 import { BOOT_TASK, bootTaskPowerShell, encodedPowerShell, writeBootScript } from "./remote/boot";
 import { readSse } from "./remote/sse";
+import { HUB_HEADER } from "./remote/api";
+import { HubTracker, cleanHubName, hubName } from "./remote/hubs";
 import type { MachineSummary, RemoteServerView, SetupStep } from "./remote/types";
 
 // The dashboard (ui/) builds to a single self-contained HTML file, embedded here as text.
@@ -238,8 +240,11 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     dir: MACHINES_DIR,
     secrets: defaultSecretStore(MACHINES_DIR),
     hubVersion: VERSION,
+    hubName: hubName(),
     urlFor: (hostname) => proxy.urlFor(hostname),
   });
+  // Hubs whose event streams are open here (this machine is another one's "pc").
+  const hubs = new HubTracker();
   // Facts found while connecting (WSL or not, which distro) are kept in config.json for next time.
   hub.on("detected", (name: string, facts: { kind?: string; distro?: string }) => {
     if (!config.local.machines?.[name]) return;
@@ -1887,6 +1892,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     if (p === "/api/machines/boot" && req.method === "POST") return bootTask(String(body.name ?? ""), !!body.install);
     if (p === "/api/machines/update" && req.method === "POST") return hub.update(String(body.name ?? ""));
+    if (p === "/api/hubs" && req.method === "GET") return { hubs: hubs.list() };
     if (p === "/api/pin" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
       const on = body.pinned !== false;
@@ -2290,6 +2296,9 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     }
     if (p === "/api/stream/events") {
       return sse(req, (send) => {
+        // A hub's stream (it names itself): counted while open, so every hub can be told about the others.
+        const from = cleanHubName(req.headers.get(HUB_HEADER));
+        const leave = from ? hubs.connect(from) : () => {};
         send("snapshot", {
           build: UI_BUILD,
           servers: [...manager.list().map(view), ...hub.views()],
@@ -2297,7 +2306,10 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
           profiles: profiles(),
           config: configSummary(),
           machines: hub.summaries(),
+          hubs: hubs.list(),
         });
+        const onHubs = (list: unknown) => send("hubs", list);
+        hubs.on("change", onHubs);
         // Other machines' servers arrive as ordinary server/remove events (with "pc/" ids).
         const onRemoteServer = (v: RemoteServerView) => send("server", v);
         const onRemoteRemove = (r: { id: string }) => send("remove", r);
@@ -2330,6 +2342,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
           hub.off("remove", onRemoteRemove);
           hub.off("machine", onMachine);
           hub.off("machine-removed", onMachineRemoved);
+          hubs.off("change", onHubs);
+          leave();
         };
       });
     }
