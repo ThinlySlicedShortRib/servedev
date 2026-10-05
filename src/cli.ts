@@ -45,7 +45,7 @@ import {
   type OpResult,
 } from "./ops";
 import { clean } from "./logs";
-import { opRemoteAdd, opRemoteBoot, opRemoteList, opRemoteReconnect, opRemoteRemove } from "./remote/ops";
+import { opRemoteAdd, opRemoteBoot, opRemoteList, opRemoteReconnect, opRemoteRemove, opRemoteUpdate } from "./remote/ops";
 import { DAEMON_LOG, DAEMON_URL, VERSION, getToken } from "./paths";
 import { findRoot, type ReadySpec } from "./project";
 
@@ -113,6 +113,7 @@ Other machines (this one is the hub; each machine runs its own servedev, reached
   servedev remote ls                        machines: connected / reconnecting / offline, versions, servers
   servedev remote rm <name>                 disconnect and forget it (nothing changes on that machine)
   servedev remote reconnect <name>          reconnect now, re-reading its token
+  servedev remote update <name>             update servedev there (git pull, install or build) and restart its daemon
   servedev remote boot <name> [--install]   Windows/WSL: start servedev at logon and keep WSL running
   Their servers' ids start with the machine: pc/demo:api. Use them anywhere a server name goes, or add
   --on <machine> to start, stop, restart, logs, status, search and ls (e.g. servedev logs api --on pc).
@@ -491,10 +492,13 @@ async function main() {
       } else if (sub === "reconnect") {
         if (!name) throw new Error("usage: servedev remote reconnect <name>");
         result = await opRemoteReconnect(name);
+      } else if (sub === "update") {
+        if (!name) throw new Error("usage: servedev remote update <name>");
+        result = await opRemoteUpdate(name);
       } else if (sub === "boot") {
         if (!name) throw new Error("usage: servedev remote boot <name> [--install]");
         result = await opRemoteBoot({ name, install: o.install });
-      } else throw new Error("usage: servedev remote add|ls|rm|reconnect|boot ...");
+      } else throw new Error("usage: servedev remote add|ls|rm|reconnect|update|boot ...");
       break;
     }
     case "ui":

@@ -15,6 +15,7 @@ import {
   PlusIcon,
   PowerIcon,
   RefreshCwIcon,
+  RotateCwIcon,
   TerminalIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -45,7 +46,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Spinner } from "@/components/ui/spinner"
 import { retryMachine, showOnlyMachine, useMachines, useRetrying } from "@/hooks/use-machines"
 import { useNow } from "@/hooks/use-servedev"
-import { ACTIVE, ago, api, type Machine, type Server, type SetupStep } from "@/lib/api"
+import { ACTIVE, ago, api, type Machine, type MachineUpdate, type Server, type SetupStep } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { MACHINE_NAME, machineKind, suggestMachineName, worstState } from "@/lib/machines"
 import { cn } from "@/lib/utils"
@@ -71,6 +72,7 @@ export function MachinesSheet({ servers }: { servers: Map<string, Server> }) {
   const [adding, setAdding] = React.useState(false)
   const [removing, setRemoving] = React.useState<Machine | null>(null)
   const [booting, setBooting] = React.useState<Machine | null>(null)
+  const [updating, setUpdating] = React.useState<Machine | null>(null)
   const worst = worstState(machines.list)
   const local = [...servers.values()].filter((s) => !s.machine)
   // This servedev's version (each machine's summary carries it too).
@@ -138,6 +140,7 @@ export function MachinesSheet({ servers }: { servers: Map<string, Server> }) {
                     now={now}
                     onRemove={() => setRemoving(m)}
                     onBoot={() => setBooting(m)}
+                    onUpdate={() => setUpdating(m)}
                     onShowOnly={() => {
                       showOnlyMachine(m.name, machines.list.map((x) => x.name))
                       setOpen(false)
@@ -182,6 +185,7 @@ export function MachinesSheet({ servers }: { servers: Map<string, Server> }) {
       </Sheet>
       <AddMachineDialog open={adding} onOpenChange={setAdding} />
       <BootDialog machine={booting} onOpenChange={(o) => !o && setBooting(null)} />
+      <UpdateDialog machine={updating} onOpenChange={(o) => !o && setUpdating(null)} />
       <AlertDialog open={removing !== null} onOpenChange={(o) => !o && setRemoving(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -247,7 +251,21 @@ function LocalCard({ servers, version }: { servers: Server[]; version?: string }
   )
 }
 
-function MachineCard({ m, now, onRemove, onBoot, onShowOnly }: { m: Machine; now: number; onRemove: () => void; onBoot: () => void; onShowOnly: () => void }) {
+function MachineCard({
+  m,
+  now,
+  onRemove,
+  onBoot,
+  onUpdate,
+  onShowOnly,
+}: {
+  m: Machine
+  now: number
+  onRemove: () => void
+  onBoot: () => void
+  onUpdate: () => void
+  onShowOnly: () => void
+}) {
   const retrying = useRetrying(m.name)
   const up = m.state === "connected"
   const { running, total, crashed } = m.counts
@@ -281,6 +299,13 @@ function MachineCard({ m, now, onRemove, onBoot, onShowOnly }: { m: Machine; now
                 <TerminalIcon />
                 Copy SSH command
               </DropdownMenuItem>
+              <DropdownMenuItem disabled={!up} onClick={onUpdate}>
+                <RotateCwIcon />
+                <div className="grid leading-tight">
+                  <span>Update servedev…</span>
+                  <span className="text-xs text-muted-foreground">{up ? "Pull its checkout and restart it there" : "Needs it connected"}</span>
+                </div>
+              </DropdownMenuItem>
               {m.kind === "wsl" && (
                 <DropdownMenuItem disabled={!up} onClick={onBoot}>
                   <PowerIcon />
@@ -310,8 +335,14 @@ function MachineCard({ m, now, onRemove, onBoot, onShowOnly }: { m: Machine; now
           {m.version ?? "unknown"}
           {m.versionMismatch && (
             <Hint label="Some things may not work between different versions. Update servedev on one side so they match.">
-              <span className={warnText}> · {m.hubVersion} here, update one side</span>
+              <span className={warnText}> · {m.hubVersion} here</span>
             </Hint>
+          )}
+          {m.versionMismatch && up && (
+            <Button size="xs" variant="outline" className="ml-2 align-middle" onClick={onUpdate}>
+              <RotateCwIcon data-icon="inline-start" />
+              Update {m.name}
+            </Button>
           )}
         </dd>
         <dt className="text-muted-foreground">Servers</dt>
@@ -339,6 +370,28 @@ function MachineCard({ m, now, onRemove, onBoot, onShowOnly }: { m: Machine; now
           </>
         )}
       </dl>
+      {up && !!m.otherHubs?.length && (
+        <div className={cn("ml-11 flex flex-col gap-1.5 p-2.5 text-xs", box)} role="status">
+          <p className="flex items-start gap-1.5">
+            <TriangleAlertIcon className={cn("mt-px size-3.5 shrink-0", warnText)} />
+            <span className="min-w-0 break-words">
+              {m.otherHubs.length === 1 ? (
+                <>
+                  Another hub, <span className="font-medium">{m.otherHubs[0]}</span>, is connected to {m.name} too.
+                </>
+              ) : (
+                <>
+                  Other hubs (<span className="font-medium">{m.otherHubs.join(", ")}</span>) are connected to {m.name} too.
+                </>
+              )}
+            </span>
+          </p>
+          <p className="text-muted-foreground">
+            Each forwards its servers' ports, so here some may have other port numbers than on {m.name}. Remove {m.name} on the other one if you don't
+            need both.
+          </p>
+        </div>
+      )}
       {!up && (m.lastError || m.state === "offline") && (
         <div className={cn("ml-11 flex flex-col gap-1.5 p-2.5 text-xs", box)}>
           <p className="flex items-start gap-1.5">
@@ -693,6 +746,144 @@ function BootDialog({ machine: m, onOpenChange }: { machine: Machine | null; onO
               {installing ? <Spinner data-icon="inline-start" /> : <PowerIcon data-icon="inline-start" />}
               Register the task
             </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Update servedev on a machine (git pull there, install or build, restart its daemon)
+// ---------------------------------------------------------------------------------------------
+
+function UpdateDialog({ machine: m, onOpenChange }: { machine: Machine | null; onOpenChange: (open: boolean) => void }) {
+  const [phase, setPhase] = React.useState<"confirm" | "running" | "done">("confirm")
+  const [result, setResult] = React.useState<MachineUpdate | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const name = m?.name
+  // Ignore an answer that comes back after the dialog was closed or reopened.
+  const run = React.useRef(0)
+  React.useEffect(() => {
+    run.current++
+  }, [name])
+  // Opened for another machine (or again): start over.
+  const [shownFor, setShownFor] = React.useState(name)
+  if (name !== shownFor) {
+    setShownFor(name)
+    setPhase("confirm")
+    setResult(null)
+    setError(null)
+  }
+
+  async function update() {
+    if (!name) return
+    const mine = ++run.current
+    setPhase("running")
+    try {
+      const r = await api<MachineUpdate>("/api/machines/update", { name })
+      if (run.current !== mine) return
+      setResult(r)
+      if (r.ok && r.machine.state === "connected") toast.success(`Updated servedev on ${name}`, { description: `${r.before.version ?? "?"} → ${r.machine.version ?? r.after?.version ?? "?"}` })
+    } catch (e) {
+      if (run.current !== mine) return
+      setError((e as Error).message)
+    }
+    setPhase("done")
+  }
+
+  const after = result?.machine.version ?? result?.after?.version
+  return (
+    <Dialog open={!!m} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Update servedev on {name}</DialogTitle>
+          <DialogDescription>
+            Pulls the git checkout servedev runs from on {name} (only when it can fast-forward and has no uncommitted changes), installs or builds what
+            changed, and restarts its daemon. Its servers keep running.
+          </DialogDescription>
+        </DialogHeader>
+        {phase === "confirm" && m && (
+          <p className="text-sm text-muted-foreground">
+            {name} runs servedev {m.version ?? "(unknown version)"}; this machine runs {m.hubVersion}.
+          </p>
+        )}
+        {phase === "running" && (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+            <Spinner className="size-4" />
+            Updating {name}; a build there can take a few minutes…
+          </p>
+        )}
+        {error && (
+          <p className={cn("p-3 text-sm text-destructive", box)} role="alert">
+            {error}
+          </p>
+        )}
+        {result && (
+          <div className="flex flex-col gap-4 text-sm" aria-live="polite">
+            <ul className="flex flex-col gap-1.5">
+              {result.done.map((d) => (
+                <li key={d} className="flex items-start gap-2">
+                  <CircleCheckIcon className={cn("mt-0.5 size-4 shrink-0", okText)} />
+                  <span className="min-w-0 break-words">{d}</span>
+                </li>
+              ))}
+              {result.error && (
+                <li className="flex items-start gap-2">
+                  <CircleXIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <span className="break-words whitespace-pre-wrap text-destructive">{result.error}</span>
+                    {result.hint && <span className="text-xs text-muted-foreground">{result.hint}</span>}
+                  </div>
+                </li>
+              )}
+            </ul>
+            {result.commits.length > 0 && (
+              <div className={cn("max-h-32 overflow-auto p-2.5 font-mono text-xs", box)}>
+                {result.commits.map((c) => (
+                  <div key={c} className="truncate">
+                    {c}
+                  </div>
+                ))}
+              </div>
+            )}
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
+              <dt className="text-muted-foreground">Commit</dt>
+              <dd className="font-mono">
+                {result.before.commit} → {result.after?.commit ?? result.before.commit}
+                <span className="text-muted-foreground"> ({result.branch})</span>
+              </dd>
+              <dt className="text-muted-foreground">servedev</dt>
+              <dd>
+                {result.before.version ?? "?"} → {after ?? "?"}
+                {after && after !== result.hubVersion ? (
+                  <span className={warnText}> · {result.hubVersion} here</span>
+                ) : (
+                  <span className="text-muted-foreground"> · same as here</span>
+                )}
+              </dd>
+            </dl>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-medium text-muted-foreground">Reconnecting</p>
+              <ol className="flex flex-col gap-2">
+                {STEPS.map((def) => (
+                  <StepRow key={def.id} label={def.label} step={result.steps.find((s) => s.id === def.id)} />
+                ))}
+              </ol>
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          {phase === "confirm" ? (
+            <>
+              <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+              <Button onClick={() => void update()}>
+                <RotateCwIcon data-icon="inline-start" />
+                Update and restart
+              </Button>
+            </>
+          ) : (
+            <DialogClose render={<Button variant={phase === "running" ? "outline" : "default"} />}>{phase === "running" ? "Close" : "Done"}</DialogClose>
           )}
         </DialogFooter>
       </DialogContent>

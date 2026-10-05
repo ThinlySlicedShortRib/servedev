@@ -164,7 +164,8 @@ test("an older servedev on the machine: its missing endpoint becomes a clear mes
   expect(isMissingEndpoint(new Error("not found: GET /api/dirs"))).toBe(false);
   const e = tooOld("pc", "0.2.0", "0.3.0", "list its folders");
   expect(e.status).toBe(501);
-  expect(e.message).toBe("pc runs servedev 0.2.0, which can't list its folders; update it (this machine runs 0.3.0).");
+  expect(e.message).toBe("pc runs servedev 0.2.0, which can't list its folders; update it: servedev remote update pc (this machine runs 0.3.0).");
+  expect(isMissingEndpoint(new RemoteApiError(501, "pc runs an older servedev …", true))).toBe(true);
 });
 
 test("a folder under this machine's home (the shell expanded ~) means the same place under the home there", () => {
@@ -300,4 +301,50 @@ test("CLI: dirs --on asks the machine; a local --dir starts as if run in that fo
   // (the folder doesn't exist in this test, so nothing is sent)
   expect(local.calls).toHaveLength(0);
   expect(local.err).toContain("no folder at");
+});
+
+const summary = {
+  name: "pc",
+  ssh: "me@pc",
+  state: "connected",
+  attempt: 0,
+  version: "0.3.1",
+  hubVersion: "0.3.1",
+  versionMismatch: false,
+  otherHubs: [],
+  counts: { total: 2, running: 1, crashed: 0 },
+  forwards: [],
+};
+
+test("CLI: remote update reports what was done, commits and versions, then the reconnect checklist", async () => {
+  const r = await cli(["remote", "update", "pc"], () => ({
+    ok: true,
+    kind: "source",
+    repo: "/mnt/c/sd",
+    branch: "main",
+    before: { commit: "1111111", version: "0.3.0" },
+    after: { commit: "2222222", version: "0.3.1" },
+    commits: ["2222222 Fix things"],
+    done: ["pulled 1 commit from origin/main (1111111 → 2222222)", "restarted its daemon (servers keep running)"],
+    restarted: true,
+    hubVersion: "0.3.1",
+    steps: [{ id: "ssh", label: "SSH connection", status: "ok", detail: "connected to me@pc" }],
+    machine: summary,
+  }));
+  expect(r.calls[0]).toEqual({ path: "/api/machines/update", body: { name: "pc" } });
+  expect(r.code).toBe(0);
+  expect(r.out).toContain("Updating servedev on pc (/mnt/c/sd, run from source, branch main):\n  ✓ pulled 1 commit");
+  expect(r.out).toContain("  2222222 Fix things");
+  expect(r.out).toContain("Commit: 1111111 → 2222222. servedev on pc: 0.3.0 → 0.3.1; this machine runs 0.3.1.");
+  expect(r.out).toContain("  ✓ SSH connection: connected to me@pc");
+});
+
+test("CLI: remote ls names another hub connected to a machine", async () => {
+  const r = await cli(["remote", "ls"], () => ({ machines: [{ ...summary, otherHubs: ["mini"] }], hubVersion: "0.3.1" }));
+  expect(r.out).toContain("⚠ another hub, mini, is connected to pc too");
+});
+
+test("MCP: update_machine takes the machine", () => {
+  const tool = TOOLS.find((t) => t.name === "update_machine")!;
+  expect((tool.inputSchema as { required?: string[] }).required).toEqual(["machine"]);
 });

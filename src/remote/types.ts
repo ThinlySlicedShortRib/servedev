@@ -60,6 +60,8 @@ export interface MachineSummary {
   version?: string;
   hubVersion: string;
   versionMismatch: boolean;
+  /** Other hubs connected to it too (they forward its ports as well); empty when its servedev doesn't say. */
+  otherHubs: string[];
   /** The remote daemon's port there, and the local end of its tunnel here. */
   remotePort?: number;
   apiPort?: number;

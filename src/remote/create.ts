@@ -4,7 +4,7 @@
  * turns the request into one that machine's own /api/start understands.
  */
 import type { PublicServer } from "../manager";
-import { RemoteApiError } from "./api";
+import { RemoteApiError, isNotFound } from "./api";
 import { RefError, resolveRemoteRef } from "./ids";
 
 /** What a start request may carry to another machine (never the hub's paths or environment). */
@@ -86,13 +86,13 @@ export async function remoteStartBody(deps: RemoteStartDeps, req: RemoteStartReq
 
 /** A remote's "not found: GET /api/dirs": its servedev predates the endpoint. */
 export function isMissingEndpoint(e: unknown): boolean {
-  return e instanceof RemoteApiError && e.status === 404 && /^not found: (GET|POST) \/api\//.test(e.message);
+  return e instanceof RemoteApiError && (e.missingEndpoint || isNotFound(e.status, e.message));
 }
 
 /** The error for a feature the machine's servedev is too old for. */
 export function tooOld(machine: string, version: string | undefined, hubVersion: string, what: string): RefError {
   return new RefError(
     501,
-    `${machine} runs servedev ${version ?? "an older version"}, which can't ${what}; update it (this machine runs ${hubVersion}).`,
+    `${machine} runs servedev ${version ?? "an older version"}, which can't ${what}; update it: servedev remote update ${machine} (this machine runs ${hubVersion}).`,
   );
 }

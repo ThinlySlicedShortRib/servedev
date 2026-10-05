@@ -13,17 +13,21 @@ import { TARGETS, chooseLocalPort, diffForwards, systemPorts, wantedPorts, type 
 import { hostAliases } from "./ids";
 import type { LongProc, Spawner } from "./process";
 import type { SecretStore } from "./secrets";
+import { otherHubs, otherHubsWarning } from "./hubs";
 import { Checklist, SERVEDEV_PROBE, StepError, missingHint, parseServedevProbe } from "./setup";
 import { readSse } from "./sse";
 import { failed, initial, retryNow, succeeded, type ConnStatus } from "./state";
 import { SshLink, createTransport, detect, type Detected, type Transport } from "./transport";
 import type { MachineConfig, SetupStep } from "./types";
+import { updateServedev, type UpdateReport } from "./update";
 
 export interface MachineDeps {
   /** Holds control sockets, cached state and (off macOS) tokens. */
   dir: string;
   secrets: SecretStore;
   hubVersion: string;
+  /** This hub's name, sent to the machine so it knows which hubs are connected. */
+  hubName?: string;
   /** Local ports taken by any machine's forwards. */
   reserved: Set<number>;
   spawner?: Spawner;
@@ -55,6 +59,10 @@ export class Machine extends EventEmitter {
   readonly forwards = new Map<number, { localPort: number; target: Target }>();
   /** Dev servers running there that its servedev didn't start (from a terminal, an agent): their ports are forwarded too. */
   outside: { command: string; ports: number[] }[] = [];
+  /** Other hubs connected to it too, as it reports them (an older servedev reports none). */
+  otherHubs: string[] = [];
+  /** An update is restarting its daemon: losing it then isn't a lost connection. */
+  private updating = false;
   /** Server id -> hub hostname (api.pc.localhost). */
   aliases = new Map<string, string>();
   steps?: SetupStep[];
@@ -151,6 +159,7 @@ export class Machine extends EventEmitter {
     let transport: Transport | undefined;
     let api: RemoteApi | undefined;
     let servers: PublicServer[] = [];
+    let hubs: string[] = [];
 
     await list.step("ssh", async () => {
       await link.open();
@@ -204,7 +213,13 @@ export class Machine extends EventEmitter {
         api = r.api;
         servers = r.servers;
       }
-      return { detail: `127.0.0.1:${api.localPort} here → port ${api.remotePort} on ${this.name}` };
+      hubs = await api.call<{ hubs: unknown }>("GET", "/api/hubs", undefined, 10_000).then((r) => otherHubs(r.hubs, this.deps.hubName), () => []);
+      const warning = otherHubsWarning(this.name, hubs);
+      return {
+        detail: `127.0.0.1:${api.localPort} here → port ${api.remotePort} on ${this.name}`,
+        warning,
+        hint: warning && `only one hub at a time keeps port numbers the same as on ${this.name}; remove it on the other one (servedev remote rm ${this.name}) if you don't need both`,
+      };
     });
 
     this.steps = list.result();
@@ -228,6 +243,7 @@ export class Machine extends EventEmitter {
       this.emit("detected", { kind: detected.kind, distro: detected.distro });
     }
     this.status = succeeded(this.status, this.now());
+    this.otherHubs = hubs;
     this.replaceServers(servers);
     this.watch(gen, link, transport!, api!);
     this.changed();
@@ -247,7 +263,7 @@ export class Machine extends EventEmitter {
     const local = await chooseLocalPort(0, this.deps.reserved, this.deps.ports ?? systemPorts);
     await link.forward(local, remotePort);
     this.deps.reserved.add(local);
-    const api = new RemoteApi(local, remotePort, token);
+    const api = new RemoteApi(local, remotePort, token, { machine: this.name, version: () => this.version, hub: this.deps.hubName });
     try {
       const health = await api.health(10_000);
       if (!health) throw new StepError(`nothing answers on port ${remotePort} on ${this.name}`, `is servedev's daemon running there? (servedev daemon status)`);
@@ -322,7 +338,9 @@ export class Machine extends EventEmitter {
     if (event === "snapshot" && Array.isArray(payload.servers)) {
       this.replaceServers(payload.servers);
       if (Array.isArray(payload.profiles)) this.replaceProfiles(payload.profiles);
+      if (Array.isArray(payload.hubs)) this.setHubs(payload.hubs);
     } else if (event === "profiles" && Array.isArray(payload)) this.replaceProfiles(payload);
+    else if (event === "hubs") this.setHubs(payload);
     else if (event === "server" && payload?.id) {
       this.servers.set(payload.id, payload);
       this.serversChanged([payload.id]);
@@ -362,6 +380,32 @@ export class Machine extends EventEmitter {
     this.saveSoon();
   }
 
+  private setHubs(list: unknown) {
+    const hubs = otherHubs(list, this.deps.hubName);
+    if (JSON.stringify(hubs) === JSON.stringify(this.otherHubs)) return;
+    this.otherHubs = hubs;
+    this.changed();
+  }
+
+  /**
+   * Update servedev there and restart its daemon (see update.ts), then reconnect, so the checklist
+   * runs again against the new one. Refusals throw before anything changes there.
+   */
+  async update(): Promise<{ report: UpdateReport; steps: SetupStep[] }> {
+    const transport = this.liveTransport();
+    if (this.updating) throw new RemoteApiError(409, `${this.name} is being updated already`);
+    // Its daemon restarting ends the event stream and fails health checks; that's expected.
+    this.updating = true;
+    let report: UpdateReport;
+    try {
+      report = await updateServedev(transport, this.name, this.deps.hubVersion);
+    } finally {
+      this.updating = false;
+    }
+    const steps = await this.reconnect();
+    return { report, steps };
+  }
+
   private serversChanged(ids: string[]) {
     this.aliases = hostAliases(this.name, [...this.servers.values()]);
     for (const id of ids) this.emit("server", id);
@@ -370,7 +414,7 @@ export class Machine extends EventEmitter {
   }
 
   private lost(gen: number, reason: string) {
-    if (gen !== this.generation || !this.connected) return;
+    if (gen !== this.generation || !this.connected || this.updating) return;
     this.teardown();
     this.lose({ message: reason });
   }
@@ -390,6 +434,7 @@ export class Machine extends EventEmitter {
     clearInterval(this.healthTimer);
     clearInterval(this.outsideTimer);
     this.outside = [];
+    this.otherHubs = [];
     this.events?.abort();
     this.events = undefined;
     this.hold?.kill();

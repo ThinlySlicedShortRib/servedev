@@ -43,7 +43,7 @@ import {
   opDirs,
   type OpResult,
 } from "./ops";
-import { opRemoteList, opRemoteReconnect } from "./remote/ops";
+import { opRemoteList, opRemoteReconnect, opRemoteUpdate } from "./remote/ops";
 import { api } from "./client";
 import { VERSION } from "./paths";
 
@@ -275,6 +275,14 @@ export const TOOLS = [
   {
     name: "reconnect_machine",
     description: "Reconnect to a machine now (instead of waiting for the next retry), re-running the connection checklist; reports each step.",
+    inputSchema: obj({ machine: { type: "string" } }, ["machine"]),
+  },
+  {
+    name: "update_machine",
+    description:
+      "Update servedev on another machine (git pull --ff-only in its checkout, then bun install or bun run build as needed) and restart its daemon; " +
+      "its servers keep running. Refuses a checkout with uncommitted changes or one that can't fast-forward. Reports commits and versions before and after, " +
+      "then the reconnect checklist. Only when the user asked, or list_machines shows its version differs and the user agrees.",
     inputSchema: obj({ machine: { type: "string" } }, ["machine"]),
   },
   // ---------- several servers ----------
@@ -632,6 +640,8 @@ export async function callTool(name: string, a: Args): Promise<OpResult> {
       return opRemoteList();
     case "reconnect_machine":
       return opRemoteReconnect(String(a.machine ?? ""));
+    case "update_machine":
+      return opRemoteUpdate(String(a.machine ?? ""));
     case "server_logs":
       return opLogs({ cwd, name: ref(), tail: a.lines, grep: a.grep, since: a.since, prev: a.previous_run, run: a.run });
     case "search_logs":
