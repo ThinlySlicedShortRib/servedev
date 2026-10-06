@@ -1,7 +1,7 @@
 export const AGENT_INSTRUCTIONS = `## Dev servers (servedev)
 
-Use \`servedev\` to run dev servers — never run them in the foreground or with \`&\`.
-It runs each server in the background, waits until it is ready, and keeps logs.
+Run every dev server through \`servedev\` unless the user explicitly says otherwise: web and API servers, watchers, workers, database proxies, \`docker compose up\`, Storybook, emulators, anything long-running. Don't start them in a shell (no foreground run, \`&\`, nohup, tmux or background shell task). Commands that finish (build, test, lint, migrations) run normally.
+servedev runs each server in the background, waits until it is ready, and keeps logs. Before starting one, check \`servedev ls --all\`: if it's already running (in servedev or outside it), use it or offer to take it over rather than starting a second copy.
 
 - \`servedev start [name] [-- <command>]\` — start (idempotent: returns the existing server if already running). Blocks until ready and prints the URL. With no command it uses servedev.json or the package.json \`dev\` script.
   - \`--install\` runs \`pnpm install\` / \`npm install\` first (use when start fails with missing modules or "command not found")

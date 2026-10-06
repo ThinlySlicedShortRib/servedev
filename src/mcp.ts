@@ -87,6 +87,7 @@ export const TOOLS = [
     name: "start_server",
     description:
       "Start a dev server in the background and wait until it is ready; returns its URL, or the error and last log lines if it fails. " +
+      "This is how to run any dev server or other long-running process, unless the user asks otherwise. " +
       "Idempotent: if a server with this name is already running it is returned as-is. " +
       "Without `command`, uses servedev.json or the package.json dev script. Also restarts a known, stopped server by name. " +
       "With `machine`, it runs on that machine (defined and owned there, in `dir`, a folder there) and its URL is forwarded here.",
@@ -762,7 +763,11 @@ export async function runMcp() {
             capabilities: { tools: {} },
             serverInfo: { name: "servedev", version: VERSION },
             instructions:
-              "Use these tools to run dev servers instead of running them in a shell (never foreground or `&`). " +
+              "Run every dev server through servedev unless the user explicitly says otherwise: web and API servers, watchers, workers, " +
+              "database proxies, `docker compose up`, Storybook, emulators, anything long-running. Don't start them in a shell (no foreground " +
+              "run, `&`, nohup, tmux or background shell task); use start_server. Commands that finish (build, test, lint, migrations) run normally. " +
+              "Before starting one, check list_servers: if it's already running (in servedev or outside it), use that one or offer to take it over " +
+              "instead of starting a second copy. " +
               "start_server is idempotent and waits until the server is ready. After code changes, run search_logs with preset='errors' " +
               "and since='1m' to check for errors instead of restarting; dev servers usually hot-reload. " +
               "Everything the servedev dashboard can do has a tool here: profiles, custom grids (get_grid/set_grid), pins, custom hostnames, " +
