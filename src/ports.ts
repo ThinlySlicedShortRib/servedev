@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import net from "node:net";
 
 export interface Listener {
@@ -7,15 +8,62 @@ export interface Listener {
   port: number;
 }
 
-/** All TCP ports in LISTEN state owned by the current user, via lsof. */
+/** All TCP ports in LISTEN state owned by the current user, via lsof (and ss on Linux). */
 export async function listeners(): Promise<Listener[]> {
-  const proc = Bun.spawn(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pgcn"], {
-    stdout: "pipe",
-    stderr: "ignore",
-  });
-  const out = await new Response(proc.stdout).text();
-  await proc.exited;
-  return parseLsof(out);
+  const [lsof, ss] = await Promise.all([
+    run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pgcn"]),
+    process.platform === "linux" ? run(["ss", "-ltnpH"]) : Promise.resolve(""),
+  ]);
+  const found = parseLsof(lsof);
+  // Linux lsof leaves out processes whose name has a space and parentheses (Next 16's
+  // "next-server (v16.3.8)"); ss lists them, so add what lsof missed.
+  const seen = new Set(found.map((l) => `${l.pid}:${l.port}`));
+  for (const l of parseSs(ss, pgidOf)) if (!seen.has(`${l.pid}:${l.port}`)) found.push(l);
+  return found;
+}
+
+async function run(cmd: string[]): Promise<string> {
+  try {
+    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
+    const out = await new Response(proc.stdout).text();
+    await proc.exited;
+    return out;
+  } catch {
+    // not installed
+    return "";
+  }
+}
+
+/** A process's group from /proc (Linux); its name can hold spaces and ")", so read after the last ")". */
+function pgidOf(pid: number): number {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) || pid;
+  } catch {
+    return pid;
+  }
+}
+
+/**
+ * `ss -ltnpH` lines: `LISTEN 0 511 *:3000 *:* users:(("next-server (v1",pid=20994,fd=22))`.
+ * Only your own processes show their pid, which is all servedev needs.
+ */
+export function parseSs(out: string, pgid: (pid: number) => number): Listener[] {
+  const result: Listener[] = [];
+  const seen = new Set<string>();
+  for (const line of out.split("\n")) {
+    const local = line.trim().split(/\s+/)[3];
+    const port = local ? Number(local.slice(local.lastIndexOf(":") + 1)) : 0;
+    if (!port) continue;
+    for (const m of line.matchAll(/\("((?:[^"\\]|\\.)*)",pid=(\d+),fd=\d+\)/g)) {
+      const pid = Number(m[2]);
+      const key = `${pid}:${port}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({ pid, pgid: pgid(pid), command: m[1], port });
+    }
+  }
+  return result;
 }
 
 export function parseLsof(out: string): Listener[] {

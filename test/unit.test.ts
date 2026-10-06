@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PRESETS, clean, parseDuration, queryLines, searchLines } from "../src/logs";
-import { discoverGroups, parseLsof, parsePs } from "../src/ports";
+import { discoverGroups, parseLsof, parsePs, parseSs } from "../src/ports";
 import { detectPackageManager, planInstall } from "../src/install";
 import { detectCommand, findRoot } from "../src/project";
 import { programName } from "../src/daemon";
@@ -35,6 +35,21 @@ test("parseLsof", () => {
   expect(parseLsof(out)).toEqual([
     { pid: 100, pgid: 100, command: "node", port: 3000 },
     { pid: 200, pgid: 150, command: "python3", port: 8000 },
+  ]);
+});
+
+test("parseSs reads names with spaces and parentheses (Next 16's next-server)", () => {
+  const out = [
+    'LISTEN 0      511                 *:3000            *:*    users:(("next-server (v1",pid=20994,fd=22))',
+    'LISTEN 0      4096        127.0.0.1:7777      0.0.0.0:*    users:(("bun",pid=11196,fd=14),("bun",pid=11197,fd=14))',
+    "LISTEN 0      128           0.0.0.0:22        0.0.0.0:*",
+    'LISTEN 0      511             [::1]:5173           [::]:*    users:(("node",pid=300,fd=20))',
+  ].join("\n");
+  expect(parseSs(out, (pid) => pid - 1)).toEqual([
+    { pid: 20994, pgid: 20993, command: "next-server (v1", port: 3000 },
+    { pid: 11196, pgid: 11195, command: "bun", port: 7777 },
+    { pid: 11197, pgid: 11196, command: "bun", port: 7777 },
+    { pid: 300, pgid: 299, command: "node", port: 5173 },
   ]);
 });
 
