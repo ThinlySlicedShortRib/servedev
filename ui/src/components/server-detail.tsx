@@ -29,7 +29,8 @@ import { CommandDialog } from "@/components/command-dialog"
 import { SaveConfigDialog } from "@/components/save-config-dialog"
 import { AppPreview } from "@/components/app-preview"
 import { LogView } from "@/components/log-view"
-import { ProcessView, useProcessGroups } from "@/components/process-view"
+import { ProcessView } from "@/components/process-view"
+import { useProcessGroups } from "@/hooks/use-process-groups"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -596,6 +597,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
             command={s?.command}
             runId={s?.runId}
             status={s?.status}
+            now={now}
             placeholder={
               down
                 ? `${s!.machine} isn't connected, so its logs can't be read right now. They're back when it reconnects.`

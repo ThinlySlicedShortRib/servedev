@@ -5,62 +5,14 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGr
 import { Hint } from "@/components/hint"
 import { cn } from "@/lib/utils"
 
-/** Case-insensitive, global; an invalid regex is searched as plain text. */
-export function searchRegex(query: string): RegExp | null {
-  if (!query) return null
-  try {
-    return new RegExp(query, "gi")
-  } catch {
-    return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
-  }
-}
-
-function lineMatches(re: RegExp, line: string): boolean {
-  re.lastIndex = 0
-  const m = re.exec(line)
-  return !!m && m[0].length > 0
-}
-
-/**
- * Search that keeps the whole log visible: returns which lines match and a current match to
- * step through. Starts on the most recent match, since logs read oldest to newest.
- */
-export function useLogSearch(lines: string[], query: string) {
-  const re = React.useMemo(() => searchRegex(query), [query])
-  const matches = React.useMemo(() => (re ? lines.flatMap((l, i) => (lineMatches(re, l) ? [i] : [])) : []), [lines, re])
-  const [current, setCurrent] = React.useState(-1)
-  const lastQuery = React.useRef(query)
-
-  React.useEffect(() => {
-    if (query !== lastQuery.current || current >= matches.length) {
-      lastQuery.current = query
-      setCurrent(matches.length - 1)
-    }
-  }, [query, matches.length, current])
-
-  const step = (delta: number) => {
-    if (!matches.length) return
-    setCurrent((c) => (c + delta + matches.length) % matches.length)
-  }
-  return {
-    re,
-    matches,
-    matchSet: React.useMemo(() => new Set(matches), [matches]),
-    /** Line index of the current match, or -1. */
-    currentLine: current >= 0 && current < matches.length ? matches[current] : -1,
-    position: current,
-    next: () => step(1),
-    prev: () => step(-1),
-  }
-}
-
 /** A log line with matches highlighted; the current match line is emphasized. */
 export function HighlightedLine({ text, re, current }: { text: string; re: RegExp | null; current: boolean }) {
   if (!re || !text) return <>{text || " "}</>
   const parts: React.ReactNode[] = []
   let last = 0
-  re.lastIndex = 0
-  for (const m of text.matchAll(re)) {
+  // A copy starts at lastIndex 0 (matchAll would start where the shared regex last stopped),
+  // without mutating the prop.
+  for (const m of text.matchAll(new RegExp(re))) {
     if (!m[0]) continue
     const start = m.index ?? 0
     if (start > last) parts.push(text.slice(last, start))
@@ -81,14 +33,6 @@ export function HighlightedLine({ text, re, current }: { text: string; re: RegEx
   }
   if (last < text.length) parts.push(text.slice(last))
   return <>{parts.length ? parts : text}</>
-}
-
-/** Scroll a line into the middle of its own scroll container, without scrolling the page around it. */
-export function scrollToLine(container: HTMLElement | null | undefined, index: number) {
-  const el = container?.querySelector<HTMLElement>(`[data-line="${index}"]`)
-  if (!container || !el) return
-  const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
-  container.scrollTop = top - container.clientHeight / 2 + el.offsetHeight / 2
 }
 
 export function LogSearchBar({

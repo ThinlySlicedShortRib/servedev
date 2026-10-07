@@ -41,12 +41,21 @@ export function useCustomGrid(profile: Profile | undefined, externalChange?: { s
   const members = profile?.servers.join(",")
   // Latest profile for async callbacks, and the membership the grid last reflected.
   const profileRef = React.useRef(profile)
-  profileRef.current = profile
+  React.useLayoutEffect(() => {
+    profileRef.current = profile
+  }, [profile])
   const lastMembers = React.useRef<string[]>(profile?.servers ?? [])
+
+  // A different scope starts empty until its layout loads; an outside change reloads in place.
+  const loadKey = `${scope}|${reloadKey}`
+  const [loading, setLoading] = React.useState(loadKey)
+  if (loading !== loadKey) {
+    setLoading(loadKey)
+    if (!reloadKey) setItems(null)
+  }
 
   React.useEffect(() => {
     let cancelled = false
-    if (!reloadKey) setItems(null)
     api<{ items: LayoutItem[] | null }>(`/api/layouts?${new URLSearchParams({ scope })}`)
       .catch(() => ({ items: null }))
       .then((r) => {

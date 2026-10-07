@@ -3,7 +3,9 @@ import * as React from "react"
 import { CopyLogMenu } from "@/components/copy-log-menu"
 import { Hint } from "@/components/hint"
 import { LineCopy } from "@/components/line-copy"
-import { HighlightedLine, LogSearchBar, scrollToLine, useLogSearch } from "@/components/log-search"
+import { HighlightedLine, LogSearchBar } from "@/components/log-search"
+import { useLogSearch } from "@/hooks/use-log-search"
+import { scrollToLine } from "@/lib/log-search"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -33,6 +35,7 @@ export function LogView({
   runId,
   status,
   placeholder,
+  now,
 }: {
   serverId?: string
   /** The server's command, for "Copy for an agent". */
@@ -41,6 +44,8 @@ export function LogView({
   runId?: number
   status?: string
   placeholder?: string
+  /** Current time (App's ticking clock), for the run picker's "5m ago" labels. */
+  now: number
 }) {
   const [runs, setRuns] = React.useState<RunEntry[]>([])
   const [choice, setChoice] = React.useState<string>("current")
@@ -48,7 +53,6 @@ export function LogView({
   const viewingPast = choice !== "current"
   const live = useLogStream(viewingPast ? undefined : serverId)
   const text = viewingPast ? (past?.text ?? "") : live
-  const now = Date.now()
 
   // Run history; refreshed when the server restarts or changes state.
   React.useEffect(() => {
@@ -104,10 +108,17 @@ export function LogView({
     if (follow && !query && v) v.scrollTop = v.scrollHeight
   }, [lines, follow, query])
 
-  // Bring the current match into view; reading a match shouldn't be interrupted by new output.
+  // Bring the current match into view; reading a match shouldn't be interrupted by new output,
+  // so landing on a match pauses follow. The match also moves when the query changes or lines
+  // shift, not only from Next/Prev, so this compares while rendering rather than in handlers.
+  const matchKey = `${search.currentLine}|${search.position}`
+  const [seenMatch, setSeenMatch] = React.useState(matchKey)
+  if (seenMatch !== matchKey) {
+    setSeenMatch(matchKey)
+    if (search.currentLine >= 0) setFollow(false)
+  }
   React.useLayoutEffect(() => {
     if (search.currentLine < 0) return
-    setFollow(false)
     scrollToLine(viewport(), search.currentLine)
   }, [search.currentLine, search.position])
 

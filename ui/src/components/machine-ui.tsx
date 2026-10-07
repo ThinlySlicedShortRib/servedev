@@ -8,6 +8,7 @@ import { Hint } from "@/components/hint"
 import { Badge } from "@/components/ui/badge"
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 import { Spinner } from "@/components/ui/spinner"
+import { useClock } from "@/hooks/use-clock"
 import { retryMachine, useMachines, useRetrying } from "@/hooks/use-machines"
 import type { Machine, MachineState } from "@/lib/api"
 import { machineIcon, machineKind, shortAgo, stateSentence, type MachineCounts } from "@/lib/machines"
@@ -166,8 +167,9 @@ export function MachineRailMarker({ machine: m, counts, folded, onToggle, now }:
 
 /** A small tag naming another machine, for grid tiles and lists. */
 export function MachineTag({ machine: m, className }: { machine: Machine; className?: string }) {
+  const now = useClock()
   return (
-    <Hint label={`Runs on ${m.name} (${machineKind(m)}), ${m.state === "connected" ? "connected" : stateSentence(m, Date.now())}`}>
+    <Hint label={`Runs on ${m.name} (${machineKind(m)}), ${m.state === "connected" ? "connected" : stateSentence(m, now)}`}>
       <span
         className={cn(
           "inline-flex h-4 shrink-0 items-center gap-1 rounded-sm border px-1 text-[10px] leading-none font-medium text-muted-foreground terminal:rounded-none friendly:rounded-full friendly:px-1.5",
