@@ -597,6 +597,7 @@ export function ServerDetail({ entry, now }: { entry: Entry; now: number }) {
             command={s?.command}
             runId={s?.runId}
             status={s?.status}
+            now={now}
             placeholder={
               down
                 ? `${s!.machine} isn't connected, so its logs can't be read right now. They're back when it reconnects.`

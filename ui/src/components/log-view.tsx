@@ -35,6 +35,7 @@ export function LogView({
   runId,
   status,
   placeholder,
+  now,
 }: {
   serverId?: string
   /** The server's command, for "Copy for an agent". */
@@ -43,6 +44,8 @@ export function LogView({
   runId?: number
   status?: string
   placeholder?: string
+  /** Current time (App's ticking clock), for the run picker's "5m ago" labels. */
+  now: number
 }) {
   const [runs, setRuns] = React.useState<RunEntry[]>([])
   const [choice, setChoice] = React.useState<string>("current")
@@ -50,7 +53,6 @@ export function LogView({
   const viewingPast = choice !== "current"
   const live = useLogStream(viewingPast ? undefined : serverId)
   const text = viewingPast ? (past?.text ?? "") : live
-  const now = Date.now()
 
   // Run history; refreshed when the server restarts or changes state.
   React.useEffect(() => {
