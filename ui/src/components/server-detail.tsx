@@ -29,7 +29,8 @@ import { CommandDialog } from "@/components/command-dialog"
 import { SaveConfigDialog } from "@/components/save-config-dialog"
 import { AppPreview } from "@/components/app-preview"
 import { LogView } from "@/components/log-view"
-import { ProcessView, useProcessGroups } from "@/components/process-view"
+import { ProcessView } from "@/components/process-view"
+import { useProcessGroups } from "@/hooks/use-process-groups"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,

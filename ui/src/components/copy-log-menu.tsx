@@ -2,7 +2,7 @@ import { BotIcon, ChevronDownIcon, CopyIcon, ListFilterIcon, ScrollTextIcon } fr
 import { toast } from "sonner"
 
 import { Hint } from "@/components/hint"
-import { searchRegex } from "@/components/log-search"
+import { searchRegex } from "@/lib/log-search"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { copyText, lineCount } from "@/lib/clipboard"

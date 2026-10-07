@@ -1,38 +1,10 @@
-import * as React from "react"
 import { ExternalLinkIcon } from "@/components/icons"
 
 import { Badge } from "@/components/ui/badge"
 import { Hint, TruncatedText } from "@/components/hint"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { api, type ProcessGroup } from "@/lib/api"
+import type { ProcessGroup } from "@/lib/api"
 import { useStyleId } from "@/components/style-provider"
-
-/** Live process groups for a server; polls while `enabled`. */
-export function useProcessGroups(serverId: string | undefined, enabled: boolean, intervalMs = 2000) {
-  const [groups, setGroups] = React.useState<ProcessGroup[] | null>(null)
-  // Start over whenever what's polled changes.
-  const key = `${serverId}|${enabled}|${intervalMs}`
-  const [polled, setPolled] = React.useState(key)
-  if (polled !== key) {
-    setPolled(key)
-    setGroups(null)
-  }
-  React.useEffect(() => {
-    if (!serverId || !enabled) return
-    let cancelled = false
-    const load = () =>
-      api<{ groups: ProcessGroup[] }>(`/api/processes?${new URLSearchParams({ id: serverId })}`)
-        .then((r) => !cancelled && setGroups(r.groups))
-        .catch(() => {})
-    void load()
-    const t = setInterval(load, intervalMs)
-    return () => {
-      cancelled = true
-      clearInterval(t)
-    }
-  }, [serverId, enabled, intervalMs])
-  return groups
-}
 
 function explain(groups: ProcessGroup[]): string {
   if (groups.length <= 1) {
