@@ -108,10 +108,17 @@ export function LogView({
     if (follow && !query && v) v.scrollTop = v.scrollHeight
   }, [lines, follow, query])
 
-  // Bring the current match into view; reading a match shouldn't be interrupted by new output.
+  // Bring the current match into view; reading a match shouldn't be interrupted by new output,
+  // so landing on a match pauses follow. The match also moves when the query changes or lines
+  // shift, not only from Next/Prev, so this compares while rendering rather than in handlers.
+  const matchKey = `${search.currentLine}|${search.position}`
+  const [seenMatch, setSeenMatch] = React.useState(matchKey)
+  if (seenMatch !== matchKey) {
+    setSeenMatch(matchKey)
+    if (search.currentLine >= 0) setFollow(false)
+  }
   React.useLayoutEffect(() => {
     if (search.currentLine < 0) return
-    setFollow(false)
     scrollToLine(viewport(), search.currentLine)
   }, [search.currentLine, search.position])
 
