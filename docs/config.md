@@ -16,6 +16,7 @@ Other files in `~/.servedev`:
 | `servedev.db` | State: runs, pids, ports, log markers, what each run started with. Mode 600: while a server with a stop command runs, its profile's account variables are kept here so the stop command gets them after a daemon restart (deleted when the run ends). Deleting it loses history only. |
 | `logs/` | One log file per run |
 | `machines/` | Other machines: last known servers, SSH control sockets, and (off macOS) their API tokens, readable only by you. See [remote.md](remote.md). |
+| `hub-id` | A random id this servedev sends to other machines, so two hubs with the same hostname are told apart |
 
 Both config files accept comments (JSONC) and have JSON Schemas for editor autocomplete: [`schema/servedev.schema.json`](../schema/servedev.schema.json) and [`schema/config.schema.json`](../schema/config.schema.json). The daemon also serves them at `http://127.0.0.1:7777/schema/<name>.json`.
 

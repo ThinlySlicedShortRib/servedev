@@ -33,13 +33,16 @@ Connection states: **connecting** (first try), **connected**, **reconnecting** (
 
 A different servedev version on the machine is reported (in the checklist and `remote ls`), not fixed on its own: update one side so they match (`servedev remote update pc` for the machine, below).
 
-**Two hubs, one machine.** Each hub names itself (its hostname, in an `x-servedev-hub` header) on its requests and its live event stream, and the machine's servedev keeps track of which hubs have a stream open. When another hub is connected to the same machine, both forward its servers' ports, so on the second one some get other port numbers; the checklist, `remote ls` and the Machines sheet then warn and name the other hub. An older servedev on the machine doesn't keep track, so there's no warning.
+**Two hubs, one machine.** Each hub names itself on its requests and its live event stream: its hostname (`x-servedev-hub`) and a random id made once and kept in `~/.servedev/hub-id` (`x-servedev-hub-id`). The machine's servedev keeps track of which hubs have a stream open, counting them by id, so two hubs with the same hostname are still two. When another hub is connected to the same machine, both forward its servers' ports, so on the second one some get other port numbers; the checklist, `remote ls` and the Machines sheet then warn and name the other hub, as `mac (3f9a1c)` (hostname and the start of its id) when it shares its hostname with another one.
+
+Mixed versions work both ways: an older hub sends only its hostname and is counted by it (two older hubs with the same hostname still look like one), and an older servedev on the machine ignores the id and counts by hostname. An older servedev that doesn't keep track at all gives no warning.
 
 ### Where things are kept
 
 | What | Where |
 |---|---|
 | The machine: `ssh`, and the detected `kind` / `distro` | `~/.servedev/config.json` → `machines` (edit by hand if you like) |
+| This hub's id (what it's told apart by on machines) | `~/.servedev/hub-id` (mode 600) |
 | Its API token | macOS Keychain (`dev.servedev.machine`), elsewhere `~/.servedev/machines/<name>.token` (mode 600). Never config.json. |
 | Last known servers, version, last seen | `~/.servedev/machines/<name>.json` |
 | SSH control socket | `~/.servedev/machines/<name>.sock` |
@@ -145,7 +148,7 @@ All under the hub's token, like the rest of the API.
 | `POST /api/machines/remove` `{ name }` | `{ removed }` |
 | `POST /api/machines/boot` `{ name, install? }` | `{ supported, script, powershell, installed?, note? }` |
 | `POST /api/machines/update` `{ name }` | `{ ok, kind, repo, branch, before, after, commits, done, error?, hint?, restarted, hubVersion, steps, machine }`; 409 when refused (nothing changed there) |
-| `GET /api/hubs` | On a machine: the hubs with an event stream open here, `{ hubs: [{ name, since }] }` (also in the event stream's snapshot as `hubs`, and a `hubs` event when it changes). A MachineSummary's `otherHubs` lists the other ones. |
+| `GET /api/hubs` | On a machine: the hubs with an event stream open here, `{ hubs: [{ name, hostname, id, since }] }` (also in the event stream's snapshot as `hubs`, and a `hubs` event when it changes). `name` is what to show (`mac (3f9a1c)` when another hub has the same hostname); `id` is null for an older hub that doesn't send one. A MachineSummary's `otherHubs` lists the other ones' names. |
 | `GET /api/stream/events` | The snapshot has `machines`; remote servers arrive as `server` / `remove` events with `pc/` ids; `machine` (a MachineSummary) when a machine's state or forwards change; `machine-removed` `{ name }`; `profiles` again when a machine's servers, shared profiles or state change what profiles show |
 | `GET /api/profiles` | Yours (members on another machine as `pc/` ids, with `unavailable`: the ones whose machine isn't connected) and this machine's shared ones, then each machine's shared ones (`machine`, `pc/` ids) |
 | `POST /api/profiles/start`, `POST /api/servers/start` `{ ids, profile }` | In order across machines; results may have `machine`, `skipped` (machine not connected) and `note` (e.g. which accounts a remote server used) |
