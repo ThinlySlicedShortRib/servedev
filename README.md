@@ -210,6 +210,7 @@ bun src/cli.ts <command>    # run the CLI from source
 bun run ui:dev              # dashboard with hot reload (Vite), proxied to the running daemon
 bun test
 bun run typecheck
+bun run build:ui            # builds ui/ into ui/dist (npm ci first when ui/package-lock.json changed)
 bun run build               # builds ui/ then compiles dist/servedev
 ```
 
@@ -217,6 +218,6 @@ bun run build               # builds ui/ then compiles dist/servedev
 
 Planned work, ideas and known rough edges are tracked in [docs/roadmap.md](docs/roadmap.md).
 
-The dashboard in `ui/` is React + [shadcn/ui](https://ui.shadcn.com) (default `base-nova` style). Add components with `npx shadcn@latest add <name>` from `ui/`. It builds to a single self-contained `ui/dist/index.html` that the daemon embeds.
+The dashboard in `ui/` is React + [shadcn/ui](https://ui.shadcn.com) (default `base-nova` style). Add components with `npx shadcn@latest add <name>` from `ui/`. It builds to a single self-contained `ui/dist/index.html` that the daemon embeds. `bun run build:ui` builds it elsewhere and then moves it into place, so a dev-mode daemon watching it never sees it missing; run from source without a build, the daemon serves a page saying to build it.
 
 macOS and Linux (needs `lsof`). Windows isn't supported yet.
