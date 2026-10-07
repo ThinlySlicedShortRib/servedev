@@ -2,7 +2,8 @@
  * SQLite: what happens, not what's configured (that's in JSON files, see config.ts). One row per
  * server with its current run and a cached copy of the definition it last ran with, one row per
  * run, log write-time marks (for --since across daemon restarts), and internal "meta" values.
- * Log text itself stays in files, one per run.
+ * Log text itself stays in files, one per run. The file is the user's alone (mode 600): server
+ * variables and a running server's account variables can hold secrets.
  */
 import { Database } from "bun:sqlite";
 import fs from "node:fs";
@@ -93,6 +94,9 @@ const MIGRATIONS = [
   // Hostnames are configuration now (config.json / servedev.json); the row only caches one, so a
   // hostname moving between servers mustn't trip a uniqueness check here.
   `DROP INDEX IF EXISTS servers_by_hostname;`,
+  // A run's account variables (a profile's picks), kept only while it runs and only when it has a
+  // stop command, so the stop command gets them after a daemon restart. Can hold credentials.
+  `ALTER TABLE runs ADD COLUMN stop_env TEXT;`,
 ];
 
 type Row = Record<string, any>;
@@ -117,9 +121,10 @@ export class Store {
   db: Database;
 
   constructor(file: string) {
-    const fresh = !fs.existsSync(file);
     this.db = new Database(file, { create: true });
-    if (fresh) fs.chmodSync(file, 0o600); // env vars can hold secrets
+    // Every time, not only when created: env vars can hold secrets. SQLite gives its -wal and -shm
+    // files the same mode.
+    fs.chmodSync(file, 0o600);
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;");
     this.migrate();
   }
@@ -309,6 +314,24 @@ export class Store {
            AND id NOT IN (SELECT current_run_id FROM servers WHERE current_run_id IS NOT NULL)`,
       )
       .run();
+    // Whatever a run that's over still keeps for its stop command isn't needed anymore.
+    this.db.query(`UPDATE runs SET stop_env = NULL WHERE stop_env IS NOT NULL AND status NOT IN ('starting', 'running', 'stopping')`).run();
+  }
+
+  // ---------- stop command environment ----------
+
+  /**
+   * The variables a run's stop command needs beyond what can be rebuilt (login shell,
+   * servedev.json, the server's own): its account variables. Never part of a Run or a Server, so
+   * no API returns them; cleared with `undefined` when the run ends.
+   */
+  setStopEnv(runId: number, env: Record<string, string> | undefined) {
+    this.db.query("UPDATE runs SET stop_env = ? WHERE id = ?").run(env && Object.keys(env).length ? JSON.stringify(env) : null, runId);
+  }
+
+  stopEnv(runId: number): Record<string, string> | undefined {
+    const r = this.db.query("SELECT stop_env FROM runs WHERE id = ?").get(runId) as Row | null;
+    return r?.stop_env ? JSON.parse(r.stop_env) : undefined;
   }
 
   // ---------- log marks (--since) ----------

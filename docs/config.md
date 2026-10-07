@@ -13,7 +13,7 @@ Other files in `~/.servedev`:
 |---|---|
 | `providers/*.json` | Account platforms you added (see [providers.md](providers.md)) |
 | `credentials/gcloud/*.json` | Saved Google app credentials, readable only by you. Never shared. |
-| `servedev.db` | State: runs, pids, ports, log markers, what each run started with. Deleting it loses history only. |
+| `servedev.db` | State: runs, pids, ports, log markers, what each run started with. Mode 600: while a server with a stop command runs, its profile's account variables are kept here so the stop command gets them after a daemon restart (deleted when the run ends). Deleting it loses history only. |
 | `logs/` | One log file per run |
 | `machines/` | Other machines: last known servers, SSH control sockets, and (off macOS) their API tokens, readable only by you. See [remote.md](remote.md). |
 
@@ -55,7 +55,7 @@ Every server and profile remembers where it came from. The dashboard tags shared
 }
 ```
 
-- `setup` runs before a server's command on every start; if it fails, the server doesn't start. `stop` runs first when it's stopped or restarted, in the server's folder with its environment and its output in the server's log; after it finishes (or fails, or runs past 30s) anything still running gets SIGTERM, then SIGKILL.
+- `setup` runs before a server's command on every start; if it fails, the server doesn't start. `stop` runs first when it's stopped or restarted, in the server's folder with its environment (the one its run started with, account variables included, even after a daemon restart) and its output in the server's log; after it finishes (or fails, or runs past 30s) anything still running gets SIGTERM, then SIGKILL.
 - A shared profile can only list its own repo's servers, never another machine's: each machine that has the repo starts its own with it.
 - `accounts` says what the servers need, like a project. Personal accounts (emails) belong in your config; servedev warns when it finds one here.
 - `grid` is the default layout. Everyone can rearrange it for themselves without changing the file.
