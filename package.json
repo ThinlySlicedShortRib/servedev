@@ -10,7 +10,7 @@
     "servedev": "bun src/cli.ts",
     "dev": "bun scripts/dev.ts",
     "ui:dev": "cd ui && npm run dev",
-    "build:ui": "cd ui && npm install && npm run build",
+    "build:ui": "bun scripts/build-ui.ts",
     "build": "bun run build:ui && bun build src/cli.ts --compile --outfile dist/servedev",
     "test": "bun test test/",
     "typecheck": "tsc --noEmit && cd ui && npm run typecheck"

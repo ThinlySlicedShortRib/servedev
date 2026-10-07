@@ -36,7 +36,6 @@ import { AccountRegistry, PROVIDERS_DIR, type Selections } from "./accounts/regi
 import { planInstall, type InstallPlan } from "./install";
 import { detectCommand, findRoot, loadConfig, type GridTile, type ReadySpec, type ServerConfig } from "./project";
 import type { Run } from "./store";
-import uiBundle from "../ui/dist/index.html" with { type: "text" };
 import { RemoteHub } from "./remote/hub";
 import { defaultSecretStore } from "./remote/secrets";
 import { assertMachineName, remoteId, splitRef } from "./remote/ids";
@@ -48,8 +47,15 @@ import { HUB_HEADER, HUB_ID_HEADER } from "./remote/api";
 import { HubTracker, cleanHubId, cleanHubName, hubId, hubName } from "./remote/hubs";
 import type { MachineSummary, RemoteServerView, SetupStep } from "./remote/types";
 
-// The dashboard (ui/) builds to a single self-contained HTML file, embedded here as text.
-const uiHtml = uiBundle as unknown as string;
+// The dashboard (ui/) builds to a single self-contained HTML file, embedded here as text (bun
+// build --compile bundles it into the binary). Run from source it may not be built yet: the daemon
+// still runs, and the page says how to build it.
+const UI_MISSING = `<!doctype html><meta charset="utf-8"><title>servedev</title>
+<p style="font-family: system-ui; margin: 2rem">The dashboard isn't built. Run <code>bun run build:ui</code> in the servedev folder, then restart the daemon.</p>`;
+const uiHtml: string = await import("../ui/dist/index.html", { with: { type: "text" } }).then(
+  (m) => m.default as unknown as string,
+  () => UI_MISSING,
+);
 /** Identifies this dashboard build; open tabs reload when the daemon serves a different one. */
 const UI_BUILD = `${VERSION}-${Bun.hash(uiHtml).toString(36)}`;
 
