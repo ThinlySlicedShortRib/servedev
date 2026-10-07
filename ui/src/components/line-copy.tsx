@@ -28,8 +28,11 @@ export function LineCopy({
     top: number
     height: number
   } | null>(null)
+  // The latest lines for the pointer listener; updated as soon as they're committed.
   const linesRef = React.useRef(lines)
-  linesRef.current = lines
+  React.useLayoutEffect(() => {
+    linesRef.current = lines
+  }, [lines])
   /** The entry copied last, for shift-click ranges. */
   const anchor = React.useRef<[number, number] | null>(null)
 
@@ -77,9 +80,10 @@ export function LineCopy({
   }, [container])
 
   // A new log (restart, other run) invalidates the shift-click anchor.
+  const empty = lines.length === 0
   React.useEffect(() => {
     anchor.current = null
-  }, [lines.length === 0])
+  }, [empty])
 
   if (!hover || hover.end >= lines.length) return null
   const size = hover.end - hover.start + 1
