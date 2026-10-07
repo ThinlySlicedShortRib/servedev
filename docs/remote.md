@@ -52,13 +52,15 @@ servedev remote update pc
 
 Over the machine's SSH connection, servedev finds where its `servedev` comes from (the same way setup finds it, then following symlinks and wrapper scripts):
 
-- **A git checkout run from source** (e.g. `~/.local/bin/servedev` containing `exec ~/.bun/bin/bun ~/servedev/src/cli.ts "$@"`): `git pull --ff-only`, `bun install` when `package.json` or the lockfile changed, then `servedev daemon restart`.
+- **A git checkout run from source** (e.g. `~/.local/bin/servedev` containing `exec ~/.bun/bin/bun ~/servedev/src/cli.ts "$@"`): `git pull --ff-only`, `bun install` when `package.json` or the lockfile changed, `bun run build:ui` when `ui/` changed (or `ui/dist/index.html` is missing or older than the last commit touching `ui/`), then `servedev daemon restart`.
 - **A binary built in a git checkout** (`<checkout>/dist/servedev`, symlinked onto PATH): `git pull --ff-only`, `bun run build` (also when the binary is older than the checkout's last commit), then the restart.
 - **Anything else**: refused, with how to update it by hand.
 
 It's also refused, before anything changes there, when the checkout has uncommitted changes (untracked files are fine), isn't on a branch, has no upstream, or has commits of its own that its upstream doesn't (it can't fast-forward). `bun` is found on the login PATH, in the wrapper script, or in `~/.bun/bin`.
 
-The restart keeps the servers running; the new daemon adopts them. Then the hub reconnects and runs the checklist. The answer lists what was done, the new commits, the commit and servedev version before and after there, and this machine's version. A source checkout's own dashboard (the machine's, not the hub's) needs `bun run build:ui` there after a change to `ui/`; the answer says so.
+The restart keeps the servers running; the new daemon adopts them. Then the hub reconnects and runs the checklist. The answer lists what was done, the new commits, the commit and servedev version before and after there, and this machine's version.
+
+**The machine's own dashboard.** A source checkout's dashboard (the one at the machine's own address, not the hub's) is rebuilt with `bun run build:ui`, which needs `npm` there. It installs with `npm ci` (only when `ui/package-lock.json` changed), so the checkout never gets uncommitted changes that would make the next update refuse, and it moves the new build into place only once it's done, so the daemon never sees it missing. Without `npm`, or when the build fails, the update still restarts the daemon, the old dashboard stays, and the answer says to run `bun run build:ui` there.
 
 **Older servedev on the machine.** A request the machine's servedev doesn't have an endpoint for answers "pc runs an older servedev (0.3.0) that can't do this yet (POST /api/command); update it: servedev remote update pc" instead of a bare 404.
 

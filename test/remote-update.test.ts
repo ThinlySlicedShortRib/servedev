@@ -44,13 +44,34 @@ case "$1" in
 esac
 `;
 
-const PKG = (extra = "") => JSON.stringify({ name: "servedev", scripts: { build: "mkdir -p dist && cp src/servedev.sh dist/servedev && chmod +x dist/servedev" }, ...(extra ? { description: extra } : {}) }, null, 2);
+const PKG = (extra = "") =>
+  JSON.stringify(
+    { name: "servedev", scripts: { build: "mkdir -p dist && cp src/servedev.sh dist/servedev && chmod +x dist/servedev", "build:ui": "bun scripts/build-ui.ts" }, ...(extra ? { description: extra } : {}) },
+    null,
+    2,
+  );
+
+/**
+ * A fake npm for the real scripts/build-ui.ts: `ci` installs, `install` also rewrites the
+ * lockfile (as it did on a real machine), `run build -- --outDir <dir>` "builds" ui/index.html (and fails on a broken one).
+ */
+const NPM = `#!/bin/sh
+echo "$*" >> "$NPM_LOG"
+case "$1" in
+  ci) mkdir -p node_modules && echo '{}' > node_modules/.package-lock.json ;;
+  install) mkdir -p node_modules && echo '{}' > node_modules/.package-lock.json && echo ' ' >> package-lock.json ;;
+  run) if grep -q broken index.html; then echo "error: vite failed"; exit 1; fi
+     rm -rf "$5" && mkdir -p "$5" && cp index.html "$5/index.html" && echo icon > "$5/vite.svg" ;;
+  *) exit 2 ;;
+esac
+`;
 
 /**
  * A servedev checkout (cloned from a bare "origin"), installed the way `kind` says, and another
- * clone to push new commits from.
+ * clone to push new commits from. With `ui`, it has a dashboard (ui/), installed and built, and
+ * the real scripts/build-ui.ts; with `npm`, a fake npm on PATH.
  */
-function setup(kind: "source" | "binary" | "other") {
+function setup(kind: "source" | "binary" | "other", opts: { ui?: boolean; npm?: boolean } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sd-update-")));
   dirs.push(root);
   const origin = path.join(root, "origin.git");
@@ -65,11 +86,33 @@ function setup(kind: "source" | "binary" | "other") {
   fs.writeFileSync(path.join(work, "src/servedev.sh"), BINARY("1.0.0"));
   fs.writeFileSync(path.join(work, "package.json"), PKG());
   fs.writeFileSync(path.join(work, ".gitignore"), "dist\nnode_modules\nbun.lock\n");
+  if (opts.ui) {
+    fs.mkdirSync(path.join(work, "ui"));
+    fs.mkdirSync(path.join(work, "scripts"));
+    fs.copyFileSync(path.join(import.meta.dir, "../scripts/build-ui.ts"), path.join(work, "scripts/build-ui.ts"));
+    fs.writeFileSync(path.join(work, "ui/index.html"), "dashboard 1\n");
+    fs.writeFileSync(path.join(work, "ui/package.json"), "{}\n");
+    fs.writeFileSync(path.join(work, "ui/package-lock.json"), "{}\n");
+  }
   sh(work, "git", "checkout", "-q", "-b", "main");
   sh(work, "git", "add", ".");
   sh(work, "git", "commit", "-q", "-m", "First");
   sh(work, "git", "push", "-q", "-u", "origin", "main");
   sh(root, "git", "clone", "-q", origin, other);
+  if (opts.ui) {
+    // Set up and built there once (both ignored by git).
+    fs.mkdirSync(path.join(work, "ui/node_modules"));
+    fs.writeFileSync(path.join(work, "ui/node_modules/.package-lock.json"), "{}");
+    fs.mkdirSync(path.join(work, "ui/dist"));
+    fs.writeFileSync(path.join(work, "ui/dist/index.html"), "dashboard 1\n");
+  }
+  const npmBin = path.join(root, "npm-bin");
+  if (opts.npm) {
+    fs.mkdirSync(npmBin);
+    fs.writeFileSync(path.join(npmBin, "npm"), NPM, { mode: 0o755 });
+  }
+  const npmLog = path.join(root, "npm-log");
+  fs.writeFileSync(npmLog, "");
   const servedev = path.join(bin, "servedev");
   if (kind === "source") fs.writeFileSync(servedev, `#!/bin/sh\nexec ${BUN} ${work}/src/cli.ts "$@"\n`, { mode: 0o755 });
   else if (kind === "binary") {
@@ -85,8 +128,9 @@ function setup(kind: "source" | "binary" | "other") {
     sh(other, "git", "push", "-q");
   };
   // bun is only reachable through the wrapper (source) or on PATH (binary), never ~/.bun here.
-  const env = { ...gitEnv(root), PATH: `${bin}:${kind === "binary" ? `${path.dirname(BUN)}:` : ""}/usr/bin:/bin`, RESTARTS: restarts };
-  return { root, work, push, env, restarts: () => fs.readFileSync(restarts, "utf8").split("\n").filter(Boolean) };
+  const env = { ...gitEnv(root), PATH: `${bin}:${kind === "binary" ? `${path.dirname(BUN)}:` : ""}${opts.npm ? `${npmBin}:` : ""}/usr/bin:/bin`, RESTARTS: restarts, NPM_LOG: npmLog };
+  const lines = (f: string) => fs.readFileSync(f, "utf8").split("\n").filter(Boolean);
+  return { root, work, push, env, restarts: () => lines(restarts), npmRuns: () => lines(npmLog) };
 }
 
 function localTransport(env: Record<string, string>, shell = "/bin/bash"): Transport & { scripts: string[] } {
@@ -151,6 +195,60 @@ test("updating a compiled binary in a checkout: pull, build, restart; up to date
   const again = await updateServedev(t, "mac", "1.2.0");
   expect(again.done).toEqual([`already up to date with origin/main (${again.before.commit})`, "restarted its daemon (servers keep running)"]);
   expect(again.commits).toEqual([]);
+}, SLOW);
+
+test("a checkout run from source rebuilds its own dashboard when ui/ changed, with npm ci when its lockfile did, and stays clean", async () => {
+  const { work, push, env, restarts, npmRuns } = setup("source", { ui: true, npm: true });
+  const t = localTransport(env);
+  const dashboard = () => fs.readFileSync(path.join(work, "ui/dist/index.html"), "utf8");
+  const clean = () => sh(work, "git", "status", "--porcelain");
+
+  push("Server only", { "src/cli.ts": CLI("1.1.0") });
+  const serverOnly = await updateServedev(t, "pc", "1.1.0");
+  expect(serverOnly.done).toEqual([expect.stringMatching(/^pulled 1 commit/), "restarted its daemon (servers keep running)"]);
+  expect(npmRuns()).toEqual([]);
+
+  push("New dashboard", { "ui/index.html": "dashboard 2\n" });
+  const r = await updateServedev(t, "pc", "1.1.0");
+  expect(r.done).toEqual([expect.stringMatching(/^pulled 1 commit/), "built its own dashboard (ui/ changed)", "restarted its daemon (servers keep running)"]);
+  expect(npmRuns()).toEqual(["run build -- --outDir node_modules/.dist-next --emptyOutDir"]);
+  expect(dashboard()).toBe("dashboard 2\n");
+  expect(fs.readdirSync(path.join(work, "ui/dist")).sort()).toEqual(["index.html", "vite.svg"]);
+  expect(fs.existsSync(path.join(work, "ui/node_modules/.dist-next"))).toBe(false);
+
+  // A new lockfile: installed with npm ci, which never rewrites it (npm install did, and the
+  // next update refused the dirty checkout).
+  push("New dependency", { "ui/package-lock.json": '{ "v": 2 }\n', "ui/index.html": "dashboard 3\n" });
+  expect((await updateServedev(t, "pc", "1.1.0")).ok).toBe(true);
+  expect(npmRuns().slice(1)).toEqual(["ci", "run build -- --outDir node_modules/.dist-next --emptyOutDir"]);
+  expect(dashboard()).toBe("dashboard 3\n");
+  expect(clean()).toBe("");
+  expect((await updateServedev(t, "pc", "1.1.0")).ok).toBe(true);
+  expect(restarts()).toEqual(["1.1.0", "1.1.0", "1.1.0", "1.1.0"]);
+
+  // Up to date but never built (or built before the last change to ui/): built anyway.
+  fs.rmSync(path.join(work, "ui/dist"), { recursive: true });
+  const unbuilt = await updateServedev(t, "pc", "1.1.0");
+  expect(unbuilt.done).toEqual([expect.stringMatching(/^already up to date/), "built its own dashboard (its build was older than ui/)", "restarted its daemon (servers keep running)"]);
+  expect(dashboard()).toBe("dashboard 3\n");
+}, SLOW);
+
+test("without npm there, or with a dashboard build that fails, the update still restarts and says what to do", async () => {
+  const noNpm = setup("source", { ui: true });
+  noNpm.push("New dashboard", { "ui/index.html": "dashboard 2\n" });
+  const r = await updateServedev(localTransport(noNpm.env), "pc", "1.0.0");
+  expect(r).toMatchObject({ ok: true, restarted: true });
+  expect(r.done[1]).toBe(`its own dashboard changed, but npm isn't on pc's login shell PATH to build it: to see it at pc's own address, run bun run build:ui in ${noNpm.work} there`);
+  expect(fs.readFileSync(path.join(noNpm.work, "ui/dist/index.html"), "utf8")).toBe("dashboard 1\n");
+
+  const broken = setup("source", { ui: true, npm: true });
+  broken.push("Broken dashboard", { "ui/index.html": "broken\n" });
+  const b = await updateServedev(localTransport(broken.env), "pc", "1.0.0");
+  expect(b).toMatchObject({ ok: true, restarted: true });
+  expect(b.done[1]).toStartWith(`building its own dashboard failed, so it still shows the old one; fix it, then run bun run build:ui in ${broken.work} there: `);
+  expect(b.done[1]).toContain("error: vite failed");
+  // The old build is kept.
+  expect(fs.readFileSync(path.join(broken.work, "ui/dist/index.html"), "utf8")).toBe("dashboard 1\n");
 }, SLOW);
 
 test("refused before anything changes: uncommitted changes, no branch, no upstream, diverged, not a checkout", async () => {

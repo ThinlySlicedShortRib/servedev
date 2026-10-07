@@ -3,7 +3,8 @@
  * comes from, pull, install or build as that kind of install needs, and restart its daemon (its
  * servers keep running and the new daemon adopts them).
  *
- *   source  a wrapper script or symlink that runs <checkout>/src/cli.ts with bun
+ *   source  a wrapper script or symlink that runs <checkout>/src/cli.ts with bun (its own
+ *           dashboard, ui/dist, is rebuilt there with `bun run build:ui` when ui/ changed)
  *   binary  <checkout>/dist/servedev, built there with `bun run build`
  *
  * Anything else (a copied binary, a package manager) is refused with how to update it by hand.
@@ -33,9 +34,14 @@ export interface Install {
   /** `git status --porcelain` lines (tracked files only). */
   dirty: string[];
   bun?: string;
+  /** npm there, which building the dashboard (ui/) needs. */
+  npm?: string;
   /** binary: when it was built, and when HEAD was committed (seconds), to tell a stale build. */
   builtAt?: number;
   committedAt?: number;
+  /** source: when ui/dist/index.html was built (absent: never), and the last commit touching ui/. */
+  uiBuiltAt?: number;
+  uiCommittedAt?: number;
 }
 
 /**
@@ -60,6 +66,7 @@ esac
 [ -z "$b" ] && b=$(command -v bun 2>/dev/null)
 [ -z "$b" ] && [ -x "$HOME/.bun/bin/bun" ] && b="$HOME/.bun/bin/bun"
 echo "@bun $b"
+echo "@npm $(command -v npm 2>/dev/null)"
 [ -z "$e" ] && exit 0
 echo "@entry $e"
 command -v git >/dev/null 2>&1 || exit 0
@@ -70,7 +77,9 @@ echo "@upstream $(git -C "$top" rev-parse --abbrev-ref --symbolic-full-name '@{u
 echo "@head $(git -C "$top" rev-parse HEAD)"
 echo "@committed $(git -C "$top" log -1 --format=%ct)"
 git -C "$top" status --porcelain --untracked-files=no | head -n 20 | sed 's/^/@dirty /'
-echo "@built $(date -r "$e" +%s 2>/dev/null)"`;
+echo "@built $(date -r "$e" +%s 2>/dev/null)"
+echo "@uicommitted $(git -C "$top" log -1 --format=%ct -- ui)"
+echo "@uibuilt $(date -r "$top/ui/dist/index.html" +%s 2>/dev/null)"`;
 
 /** Lines tagged @name: their values (stray output from login scripts is ignored). */
 function tags(stdout: string, name: string): string[] {
@@ -104,8 +113,11 @@ export function parseInstall(stdout: string): Install {
     head: tag(stdout, "head"),
     dirty: tags(stdout, "dirty").filter((l) => l.trim()),
     bun: tag(stdout, "bun"),
+    npm: tag(stdout, "npm"),
     builtAt: num(tag(stdout, "built")),
     committedAt: num(tag(stdout, "committed")),
+    uiBuiltAt: num(tag(stdout, "uibuilt")),
+    uiCommittedAt: num(tag(stdout, "uicommitted")),
   };
 }
 
@@ -236,9 +248,23 @@ export async function updateServedev(t: Transport, machine: string, hubVersion: 
       }
       report.done.push(`built ${install.entry}`);
     }
-  } else if (changed.some((f) => f.startsWith("ui/"))) {
-    // Its own dashboard only (the hub's is this machine's); building it needs npm there too.
-    report.done.push(`its own dashboard changed: to see it at ${machine}'s own address, run bun run build:ui in ${install.repo} there`);
+  } else {
+    // Its own dashboard only (the hub's is this machine's). Rebuilt when the pull changed ui/, or
+    // when the build is missing or older than the last change to ui/. build:ui swaps the new
+    // build in (the daemon never sees it missing) and installs with npm ci, so the checkout stays
+    // clean for the next update. A failed build keeps the old dashboard and doesn't stop the
+    // update: the daemon still restarts on the new code.
+    const uiChanged = changed.some((f) => f.startsWith("ui/"));
+    const uiStale = install.uiCommittedAt !== undefined && (install.uiBuiltAt === undefined || install.uiBuiltAt < install.uiCommittedAt);
+    const byHand = `run bun run build:ui in ${install.repo} there`;
+    if ((uiChanged || uiStale) && !install.npm) {
+      report.done.push(`its own dashboard ${uiChanged ? "changed" : "is out of date"}, but npm isn't on ${machine}'s login shell PATH to build it: to see it at ${machine}'s own address, ${byHand}`);
+    } else if (uiChanged || uiStale) {
+      const npm = posixQuote(install.npm!);
+      const r = await t.run(`export PATH="$(dirname ${npm}):$PATH"; ${withBun} ${bun} run build:ui 2>&1`, { timeoutMs: 900_000 });
+      if (r.code === 0) report.done.push(`built its own dashboard (${uiChanged ? "ui/ changed" : "its build was older than ui/"})`);
+      else report.done.push(`building its own dashboard failed, so it still shows the old one; fix it, then ${byHand}: ${tail(r, 4)}`);
+    }
   }
 
   const version = await t.run(`servedev --version 2>&1 | head -n 1`, { timeoutMs: 30_000 });
