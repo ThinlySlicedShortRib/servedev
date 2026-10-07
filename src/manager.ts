@@ -125,6 +125,11 @@ interface Runtime {
   lastMark: number;
   /** The run's environment, for its stop command. Unknown for a run adopted after a daemon restart. */
   env?: Record<string, string>;
+  /**
+   * The run's account variables. Saved with the run while it has a stop command (see
+   * saveStopEnv), so an adopted run's stop command gets them too.
+   */
+  accountEnv?: Record<string, string>;
 }
 
 const URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|[\w.-]+\.local):(\d{2,5})/g;
@@ -230,6 +235,7 @@ export class Manager extends EventEmitter {
       if (serverAlive(s)) {
         // Adopt a server that survived a daemon restart.
         rt.scanOffset = fileSize(s.logFile);
+        if (s.runId) rt.accountEnv = this.store.stopEnv(s.runId);
         if (s.status === "stopping") void this.stop(s.id);
         else if (!s.readyAt) {
           s.status = "starting";
@@ -242,6 +248,7 @@ export class Manager extends EventEmitter {
         s.ports = [];
         s.url = undefined;
         s.stoppedAt ??= Date.now();
+        if (s.runId) this.store.setStopEnv(s.runId, undefined);
       }
     }
     this.store.saveServers(this.list());
@@ -339,6 +346,7 @@ export class Manager extends EventEmitter {
       const fresh = !s;
       s ??= { id: d.id, name: d.name, project: d.project, root: d.root, command: d.command, cwd: d.cwd, env: {}, ready: {}, status: "stopped", ports: [], logFile: "", restarts: 0 };
       const before = JSON.stringify([s.command, s.setup, s.stop, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]);
+      const hadStop = !!s.stop;
       Object.assign(s, {
         name: d.name,
         project: d.project,
@@ -356,6 +364,8 @@ export class Manager extends EventEmitter {
       const shown = this.servers.has(d.id);
       this.servers.set(d.id, s);
       this.hidden.delete(d.id);
+      // A stop command added to (or removed from) a running server: keep (or drop) what it needs.
+      if (!!s.stop !== hadStop && ACTIVE.includes(s.status)) this.saveStopEnv(s);
       if (fresh || !shown || JSON.stringify([s.command, s.setup, s.stop, s.cwd, s.env, s.portSpec, s.ready, s.hostname, s.pinned, s.root, s.project]) !== before) {
         this.emit("change", s);
       }
@@ -456,6 +466,8 @@ export class Manager extends EventEmitter {
     };
     if (port !== undefined) env.PORT = String(port);
     rt.env = env;
+    rt.accountEnv = spec.accountEnv;
+    this.saveStopEnv(s);
     // Setup output goes to the same log; a failing setup exits before the server starts.
     const script = spec.setup
       ? `echo ${shq(`[servedev] $ ${spec.setup}`)}\n${spec.setup} || exit $?\necho ${shq(`[servedev] $ ${command}`)}\n${command}`
@@ -505,6 +517,8 @@ export class Manager extends EventEmitter {
     s.stoppedAt = Date.now();
     s.ports = [];
     s.url = undefined;
+    rt.env = rt.accountEnv = undefined;
+    if (s.runId) this.store.setStopEnv(s.runId, undefined);
     // Take down any stragglers left in its groups.
     signalServer(s, "SIGKILL");
     const reason = wasStopping
@@ -537,15 +551,26 @@ export class Manager extends EventEmitter {
   }
 
   /**
+   * Keep the run's account variables in the database while it runs with a stop command, and only
+   * then: the rest of its environment can be rebuilt after a daemon restart, these can't.
+   */
+  private saveStopEnv(s: Server) {
+    if (s.runId) this.store.setStopEnv(s.runId, s.stop ? this.runtime(s.id).accountEnv : undefined);
+  }
+
+  /**
    * Run the server's stop command (e.g. "docker compose down") in its folder, with its run's
    * environment and its output in the server's log. Signals follow either way, so a failing or
    * hanging stop command can't keep the server running.
    */
   private async runStopCommand(s: Server) {
     const log = (line: string) => s.logFile && fs.appendFileSync(s.logFile, `[servedev] ${line}\n`);
-    const env = this.runtime(s.id).env ?? {
+    const rt = this.runtime(s.id);
+    // Adopted after a daemon restart: rebuilt the way start() builds it, with the saved account variables.
+    const env = rt.env ?? {
       ...(await this.baseEnv(s)),
       ...s.env,
+      ...rt.accountEnv,
       PWD: s.cwd,
       BROWSER: "none",
       ...(s.port !== undefined ? { PORT: String(s.port) } : {}),

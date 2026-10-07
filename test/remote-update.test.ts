@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { HubTracker, cleanHubName, hubName, otherHubs, otherHubsWarning } from "../src/remote/hubs";
+import { HubTracker, cleanHubId, cleanHubName, hubId, hubName, otherHubs, otherHubsWarning } from "../src/remote/hubs";
 import type { Transport } from "../src/remote/transport";
 import { INSTALL_PROBE, compareVersions, parseInstall, refusal, updateServedev } from "../src/remote/update";
 
@@ -230,13 +230,13 @@ test("hubs: open streams counted per hub; a change only when one comes or goes",
   const hubs = new HubTracker(() => t);
   const changes: unknown[] = [];
   hubs.on("change", (l) => changes.push(l));
-  const a1 = hubs.connect("mac");
+  const a1 = hubs.connect("mac", "aaaa1111");
   t = 2000;
-  const a2 = hubs.connect("mac");
-  const b = hubs.connect("mini");
+  const a2 = hubs.connect("mac", "aaaa1111");
+  const b = hubs.connect("mini", "bbbb2222");
   expect(hubs.list()).toEqual([
-    { name: "mac", since: 1000 },
-    { name: "mini", since: 2000 },
+    { name: "mac", hostname: "mac", id: "aaaa1111", since: 1000 },
+    { name: "mini", hostname: "mini", id: "bbbb2222", since: 2000 },
   ]);
   a1();
   a1();
@@ -247,13 +247,57 @@ test("hubs: open streams counted per hub; a change only when one comes or goes",
   expect(changes.length).toBe(4);
 });
 
-test("hubs: names, the others in a machine's list, and the warning", () => {
+test("hubs: two with the same hostname count as two, shown with the start of their ids; an older one is counted by hostname", () => {
+  let t = 1000;
+  const hubs = new HubTracker(() => t++);
+  const a = hubs.connect("mac", "aaaa1111aaaa1111");
+  hubs.connect("mac", "bbbb2222bbbb2222");
+  hubs.connect("mac"); // an older hub: no id
+  hubs.connect("mac");
+  expect(hubs.list()).toEqual([
+    { name: "mac (aaaa11)", hostname: "mac", id: "aaaa1111aaaa1111", since: 1000 },
+    { name: "mac (bbbb22)", hostname: "mac", id: "bbbb2222bbbb2222", since: 1001 },
+    { name: "mac", hostname: "mac", id: null, since: 1002 },
+  ]);
+  a();
+  hubs.connect("mini", "cccc3333");
+  // Alone with its hostname again (the older one has no id to show): just the hostname.
+  expect(hubs.list().map((h) => h.name)).toEqual(["mac (bbbb22)", "mac", "mini"]);
+});
+
+test("hubs: names and ids, the others in a machine's list, and the warning", () => {
   expect(hubName("Seans-MacBook-Pro.local")).toBe("Seans-MacBook-Pro");
   expect(cleanHubName("mac <script>")).toBe("macscript");
   expect(cleanHubName("")).toBeUndefined();
-  expect(otherHubs([{ name: "mac", since: 1 }, { name: "mini", since: 2 }, "junk"], "mac")).toEqual(["mini"]);
-  expect(otherHubs(undefined, "mac")).toEqual([]);
+  expect(cleanHubId(" ABCDEF0123456789 ")).toBe("abcdef0123456789");
+  expect(cleanHubId("mac (1234)")).toBeUndefined();
+  expect(cleanHubId(null)).toBeUndefined();
+  // A machine that counts by id: this hub is the entry with its id, even when another has its hostname.
+  const byId = [
+    { name: "mac (aaaa11)", hostname: "mac", id: "aaaa1111", since: 1 },
+    { name: "mac (bbbb22)", hostname: "mac", id: "bbbb2222", since: 2 },
+    { name: "mac", hostname: "mac", id: null, since: 3 },
+  ];
+  expect(otherHubs(byId, { name: "mac", id: "aaaa1111" })).toEqual(["mac (bbbb22)", "mac"]);
+  // An older machine lists hostnames only: this hub is the one with its hostname.
+  expect(otherHubs([{ name: "mac", since: 1 }, { name: "mini", since: 2 }, "junk"], { name: "mac", id: "aaaa1111" })).toEqual(["mini"]);
+  // An older hub ("mac", no id) leaves out the entries named like its hostname: the other "mac" still shows.
+  expect(byId.slice(1).map((h) => h.name).filter((n) => n !== "mac")).toEqual(["mac (bbbb22)"]);
+  expect(otherHubs(undefined, { name: "mac" })).toEqual([]);
   expect(otherHubsWarning("pc", [])).toBeUndefined();
   expect(otherHubsWarning("pc", ["mini"])).toBe("another hub, mini, is connected to pc too: each forwards its servers' ports, so some may have other port numbers here");
   expect(otherHubsWarning("pc", ["a", "b"])).toStartWith("other hubs (a, b) are connected to pc too");
+});
+
+test("hubs: the id is made once and kept, readable only by the user", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sd-hubid-"));
+  try {
+    const file = path.join(dir, "home", "hub-id");
+    const id = hubId(file);
+    expect(id).toMatch(/^[0-9a-f]{16}$/);
+    expect(hubId(file)).toBe(id);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

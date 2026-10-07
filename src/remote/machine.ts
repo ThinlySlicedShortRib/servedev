@@ -28,6 +28,8 @@ export interface MachineDeps {
   hubVersion: string;
   /** This hub's name, sent to the machine so it knows which hubs are connected. */
   hubName?: string;
+  /** This hub's id (see hubs.ts), sent with its name so hubs with the same hostname are told apart. */
+  hubId?: string;
   /** Local ports taken by any machine's forwards. */
   reserved: Set<number>;
   spawner?: Spawner;
@@ -213,7 +215,7 @@ export class Machine extends EventEmitter {
         api = r.api;
         servers = r.servers;
       }
-      hubs = await api.call<{ hubs: unknown }>("GET", "/api/hubs", undefined, 10_000).then((r) => otherHubs(r.hubs, this.deps.hubName), () => []);
+      hubs = await api.call<{ hubs: unknown }>("GET", "/api/hubs", undefined, 10_000).then((r) => otherHubs(r.hubs, this.hubSelf()), () => []);
       const warning = otherHubsWarning(this.name, hubs);
       return {
         detail: `127.0.0.1:${api.localPort} here → port ${api.remotePort} on ${this.name}`,
@@ -263,7 +265,7 @@ export class Machine extends EventEmitter {
     const local = await chooseLocalPort(0, this.deps.reserved, this.deps.ports ?? systemPorts);
     await link.forward(local, remotePort);
     this.deps.reserved.add(local);
-    const api = new RemoteApi(local, remotePort, token, { machine: this.name, version: () => this.version, hub: this.deps.hubName });
+    const api = new RemoteApi(local, remotePort, token, { machine: this.name, version: () => this.version, hub: this.deps.hubName, hubId: this.deps.hubId });
     try {
       const health = await api.health(10_000);
       if (!health) throw new StepError(`nothing answers on port ${remotePort} on ${this.name}`, `is servedev's daemon running there? (servedev daemon status)`);
@@ -380,8 +382,12 @@ export class Machine extends EventEmitter {
     this.saveSoon();
   }
 
+  private hubSelf() {
+    return { name: this.deps.hubName, id: this.deps.hubId };
+  }
+
   private setHubs(list: unknown) {
-    const hubs = otherHubs(list, this.deps.hubName);
+    const hubs = otherHubs(list, this.hubSelf());
     if (JSON.stringify(hubs) === JSON.stringify(this.otherHubs)) return;
     this.otherHubs = hubs;
     this.changed();

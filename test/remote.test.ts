@@ -161,7 +161,7 @@ function fakeRemote(
   extra?: (req: Request, url: URL) => Response | undefined | Promise<Response | undefined>,
 ) {
   const hosts: string[] = [];
-  /** "<path> <x-servedev-hub>" for every request. */
+  /** "<path> <x-servedev-hub> <x-servedev-hub-id>" for every request. */
   const hubHeaders: string[] = [];
   const streams: ReadableStreamDefaultController[] = [];
   const srv = Bun.serve({
@@ -170,7 +170,7 @@ function fakeRemote(
     idleTimeout: 0,
     async fetch(req) {
       hosts.push(req.headers.get("host") ?? "");
-      hubHeaders.push(`${new URL(req.url).pathname} ${req.headers.get("x-servedev-hub")}`);
+      hubHeaders.push(`${new URL(req.url).pathname} ${req.headers.get("x-servedev-hub")} ${req.headers.get("x-servedev-hub-id")}`);
       if (req.headers.get("host") !== "127.0.0.1:7777") return new Response("forbidden host", { status: 403 });
       const p = new URL(req.url).pathname;
       if (p === "/api/health") return Response.json({ ok: true, version: "0.2.0", pid: 42 });
@@ -212,12 +212,12 @@ function fakePorts(apiPort: number, reserved: Set<number>, opts: { busy?: number
   };
 }
 
-function machine(name: string, o: FakeOpts & { secrets?: SecretStore; ports?: PortProbe; extra?: Parameters<typeof fakeRemote>[2]; hubName?: string } = {}) {
+function machine(name: string, o: FakeOpts & { secrets?: SecretStore; ports?: PortProbe; extra?: Parameters<typeof fakeRemote>[2]; hubName?: string; hubId?: string } = {}) {
   const remote = fakeRemote(o.token ?? "tok", undefined, o.extra);
   const ssh = fakeSsh({ servedev: "ok", ...o });
   const secrets = o.secrets ?? memorySecrets();
   const reserved = new Set<number>();
-  const m = new Machine(name, { ssh: "me@pc" }, { dir: tmp(), secrets, hubVersion: "0.2.0", hubName: o.hubName, reserved, spawner: ssh.spawner, ports: o.ports ?? fakePorts(remote.port, reserved) });
+  const m = new Machine(name, { ssh: "me@pc" }, { dir: tmp(), secrets, hubVersion: "0.2.0", hubName: o.hubName, hubId: o.hubId, reserved, spawner: ssh.spawner, ports: o.ports ?? fakePorts(remote.port, reserved) });
   cleanups.push(() => m.dispose());
   return { m, ssh, remote, secrets };
 }
@@ -687,9 +687,11 @@ test("updating a machine that isn't connected, or that refuses: nothing changes 
 });
 
 test("another hub connected to the machine: named in the checklist, kept up to date from its events; an older servedev means no warning", async () => {
+  const self = { name: "me", hostname: "me", id: "aaaa1111", since: 1 };
   const { m, remote } = machine("pc", {
     hubName: "me",
-    extra: (_req, url) => (url.pathname === "/api/hubs" ? Response.json({ hubs: [{ name: "me", since: 1 }, { name: "mini", since: 2 }] }) : undefined),
+    hubId: "aaaa1111",
+    extra: (_req, url) => (url.pathname === "/api/hubs" ? Response.json({ hubs: [self, { name: "mini", hostname: "mini", id: "bbbb2222", since: 2 }] }) : undefined),
   });
   const steps = await m.connect();
   const api = steps.find((s) => s.id === "api")!;
@@ -698,22 +700,39 @@ test("another hub connected to the machine: named in the checklist, kept up to d
   expect(api.hint).toContain("servedev remote rm pc");
   expect(m.otherHubs).toEqual(["mini"]);
   await Bun.sleep(50);
-  // This hub names itself on its requests and on its event stream.
-  expect(remote.hubHeaders).toContain("/api/stream/events me");
-  expect(remote.hubHeaders).toContain("/api/servers me");
+  // This hub names itself (hostname and id) on its requests and on its event stream.
+  expect(remote.hubHeaders).toContain("/api/stream/events me aaaa1111");
+  expect(remote.hubHeaders).toContain("/api/servers me aaaa1111");
   let changes = 0;
   m.on("status", () => changes++);
-  remote.send("hubs", [{ name: "me", since: 1 }]);
+  remote.send("hubs", [self]);
   await Bun.sleep(50);
   expect(m.otherHubs).toEqual([]);
-  remote.send("hubs", [{ name: "me", since: 1 }]);
+  remote.send("hubs", [self]);
   await Bun.sleep(20);
   expect(changes).toBe(1);
+  // Another hub with the same hostname: told apart by its id, shown with the start of it.
+  remote.send("hubs", [
+    { ...self, name: "me (aaaa11)" },
+    { name: "me (cccc33)", hostname: "me", id: "cccc3333", since: 3 },
+  ]);
+  await Bun.sleep(50);
+  expect(m.otherHubs).toEqual(["me (cccc33)"]);
 
-  const old = machine("old", { hubName: "me" });
+  const old = machine("old", { hubName: "me", hubId: "aaaa1111" });
   const oldSteps = await old.m.connect();
   expect(oldSteps.find((s) => s.id === "api")?.status).toBe("ok");
   expect(old.m.otherHubs).toEqual([]);
+});
+
+test("a machine that lists hubs by hostname only (older servedev): this hub is the one with its hostname", async () => {
+  const { m } = machine("pc", {
+    hubName: "me",
+    hubId: "aaaa1111",
+    extra: (_req, url) => (url.pathname === "/api/hubs" ? Response.json({ hubs: [{ name: "me", since: 1 }, { name: "mini", since: 2 }] }) : undefined),
+  });
+  await m.connect();
+  expect(m.otherHubs).toEqual(["mini"]);
 });
 
 test("a relayed request an older servedev doesn't have: says so, and how to update it", async () => {

@@ -44,8 +44,8 @@ import { refsThere, remoteProfileView, withRemoteMembers } from "./remote/profil
 import { listDirs } from "./dirs";
 import { BOOT_TASK, bootTaskPowerShell, encodedPowerShell, writeBootScript } from "./remote/boot";
 import { readSse } from "./remote/sse";
-import { HUB_HEADER } from "./remote/api";
-import { HubTracker, cleanHubName, hubName } from "./remote/hubs";
+import { HUB_HEADER, HUB_ID_HEADER } from "./remote/api";
+import { HubTracker, cleanHubId, cleanHubName, hubId, hubName } from "./remote/hubs";
 import type { MachineSummary, RemoteServerView, SetupStep } from "./remote/types";
 
 // The dashboard (ui/) builds to a single self-contained HTML file, embedded here as text.
@@ -244,6 +244,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     secrets: defaultSecretStore(MACHINES_DIR),
     hubVersion: VERSION,
     hubName: hubName(),
+    hubId: hubId(),
     urlFor: (hostname) => proxy.urlFor(hostname),
   });
   // Hubs whose event streams are open here (this machine is another one's "pc").
@@ -2305,7 +2306,7 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
       return sse(req, (send) => {
         // A hub's stream (it names itself): counted while open, so every hub can be told about the others.
         const from = cleanHubName(req.headers.get(HUB_HEADER));
-        const leave = from ? hubs.connect(from) : () => {};
+        const leave = from ? hubs.connect(from, cleanHubId(req.headers.get(HUB_ID_HEADER))) : () => {};
         send("snapshot", {
           build: UI_BUILD,
           servers: [...manager.list().map(view), ...hub.views()],
