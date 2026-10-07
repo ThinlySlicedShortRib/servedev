@@ -8,23 +8,21 @@ Principle: agents add and edit most servers, and they already know the commands.
 
 Committed to; roughly in order.
 
-- **Dev mode survives a rebuild.** `bun run build` briefly removes `ui/dist/index.html`; dev mode's `bun --watch` daemon reloads at that moment, fails to import it and stays down until the next file change (and with it the forwards of any machine it's connected to).
+_Nothing right now._
 
 ## Improvements
 
 Things that work but could work better.
 
-- **The rest of the dashboard lint (23).** Left on purpose for now: `react-refresh/only-export-components` (mostly shadcn files), `Date.now()` in render for relative times, and effects in `new-server-dialog.tsx`, `use-custom-grid.ts`, `line-copy.tsx`, `log-search.tsx` and `log-view.tsx` that need care to restructure.
-- **Stop command after a daemon restart.** A server adopted by a new daemon runs its stop command without its profile's account variables (they aren't saved with the run).
-- **`servedev remote update` and the machine's dashboard.** A machine that runs from source isn't rebuilt by an update; the report says to run `bun run build:ui` there when `ui/` changed.
-- **Hubs with the same hostname** look like one hub to the two-hubs warning.
+- **The dashboard after a dev daemon starts without a build.** If `ui/dist/index.html` is missing when dev mode starts, building it later doesn't reload the daemon (bun only watches files it loaded); the fallback page says to restart.
+- **`remote update` needs npm to rebuild a machine's dashboard.** A machine with bun but no npm keeps the old dashboard and gets a note.
 
 ## Explore
 
 Ideas to look into before deciding.
 
-- **Managing environments.** See and edit a server's variables in one place (only `env` set on purpose is stored today; the rest comes from the login shell), and maybe named sets (dev / staging / prod) or `.env` files to switch between.
-- **One-time scripts.** Easy to add and run commands that finish (migrations, seeds, codegen, a test run) next to the servers, and easy to see how each run went: exit code, duration, output, past runs.
+- **Managing environments.** Designs to react to: [environments & one-time scripts](https://claude.ai/artifact/1TrXeRERg79LpA4ZUo7xZL) (layered variables on a server; named environments with `.env` files). See and edit a server's variables in one place (only `env` set on purpose is stored today; the rest comes from the login shell), and maybe named sets (dev / staging / prod) or `.env` files to switch between.
+- **One-time scripts.** Designs on the same canvas (scripts with run history; scripts as steps in a profile). Easy to add and run commands that finish (migrations, seeds, codegen, a test run) next to the servers, and easy to see how each run went: exit code, duration, output, past runs.
 - **Tags.** Add or remove the tags a server carries, beyond the built-in ones (branch, accounts, machine), to group and filter servers.
 - **Windows without WSL.** servedev needs `lsof` today (macOS, Linux, WSL).
 - **Forwarding other ports from a machine on request.** Only dev servers are forwarded now; maybe a per-machine list of extra ports (databases, tools) for what the old `pc-ports` script used to cover.
@@ -32,6 +30,13 @@ Ideas to look into before deciding.
 
 ## Done
 
+- 2026-10-07: A rebuild never removes the dashboard file, so dev mode survives `bun run build`; a daemon with no dashboard build serves a short page instead of failing.
+- 2026-10-07: `servedev remote update` rebuilds a source checkout's own dashboard when `ui/` changed (with `npm ci`, so the checkout stays clean).
+- 2026-10-07: A stop command keeps the run's account variables across a daemon restart (saved only while the run lasts, readable only by you).
+- 2026-10-07: Hubs with the same hostname are told apart by a hub id.
+- 2026-10-07: Dashboard lint at zero.
+- 2026-10-06: Agents are told every dev server goes through servedev unless the user says otherwise (MCP instructions, `start_server`, the CLAUDE.md snippet).
+- 2026-10-06: Linux/WSL: ports of processes lsof leaves out (Next 16's `next-server (v…)`) are found with `ss`.
 - 2026-10-05: Optional `stop` command per server (e.g. `docker compose down`), run before the stop signals; editable in the dashboard, `edit_server` and the CLI.
 - 2026-10-05: `servedev edit <server>` in the CLI.
 - 2026-10-05: `servedev remote update <machine>`: pull (and build) servedev there and restart its daemon; also a dashboard button and the `update_machine` MCP tool.
