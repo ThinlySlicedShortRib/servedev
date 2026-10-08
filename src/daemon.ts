@@ -10,6 +10,7 @@ import { autostartStatus, installAutostart, uninstallAutostart } from "./autosta
 import { gitBranch } from "./git";
 import { cwdsOf, detectExternal, launcherOf, startTimesOf, suggestName, type ExternalServer } from "./external";
 import { selfCommand } from "./client";
+import { Unsupported, platform } from "./platform";
 import { configState, mergedEntry, planSave, readyToConfig, sameValue } from "./config-file";
 import {
   ConfigConflict,
@@ -772,23 +773,11 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   /** Native folder picker on the machine running the daemon. Resolves to null when cancelled. */
   async function pickFolder(start?: string): Promise<string | null> {
     if (picking) throw new HttpError(409, "a folder picker is already open");
-    let cmd: string[];
-    if (process.platform === "darwin") {
-      const from = start && fs.existsSync(start) ? ` default location (POSIX file ${JSON.stringify(start)})` : "";
-      // `activate` brings osascript's own dialog to the front; no Automation permission needed.
-      cmd = ["osascript", "-e", "activate", "-e", `POSIX path of (choose folder with prompt "Choose a folder to run a dev server in"${from})`];
-    } else if (Bun.which("zenity")) {
-      cmd = ["zenity", "--file-selection", "--directory", "--title=Choose a folder to run a dev server in", ...(start ? [`--filename=${start}/`] : [])];
-    } else {
-      throw new HttpError(501, "no native folder picker on this system; type the path instead");
-    }
     picking = true;
     try {
-      const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-      const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-      if (code === 0) return out.trim().replace(/(.)\/$/, "$1") || null;
-      if (proc.signalCode || /-128|cancel/i.test(err) || (cmd[0] === "zenity" && code === 1)) return null;
-      throw new HttpError(500, `folder picker failed: ${err.trim() || `exit ${code}`}`);
+      return await platform.pickFolder(start);
+    } catch (e) {
+      throw new HttpError(e instanceof Unsupported ? 501 : 500, (e as Error).message);
     } finally {
       picking = false;
     }
@@ -1181,26 +1170,8 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   }
 
   /** Stop an outside server's own process tree (not its whole process group, which may hold a shell). */
-  async function stopTree(pids: number[]) {
-    const alive = () => pids.filter((pid) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    const signal = (sig: NodeJS.Signals) => alive().forEach((pid) => {
-      try {
-        process.kill(pid, sig);
-      } catch {}
-    });
-    signal("SIGTERM");
-    for (let i = 0; i < 50 && alive().length; i++) await Bun.sleep(100);
-    if (alive().length) {
-      signal("SIGKILL");
-      for (let i = 0; i < 20 && alive().length; i++) await Bun.sleep(100);
-    }
+  function stopTree(pids: number[]) {
+    return platform.stopPids(pids);
   }
 
   /**

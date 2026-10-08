@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { platform } from "./platform";
 
 export const VERSION = "0.3.0";
 
-export const HOME = process.env.SERVEDEV_HOME ?? path.join(os.homedir(), ".servedev");
+export const HOME = process.env.SERVEDEV_HOME ?? platform.defaultHome();
 export const LOG_DIR = path.join(HOME, "logs");
 /** Pre-SQLite state; imported into the database once, then renamed. */
 export const STATE_FILE = path.join(HOME, "state.json");
