@@ -97,6 +97,13 @@ interface FakeOpts {
   /** Port of the fake remote API; forwards "land" there. */
   apiPort?: number;
   denied?: boolean;
+  /**
+   * What `servedev keys issue` does there: issues a key (the default; with `issue`), isn't there
+   * (an older servedev: its token is read instead), refuses a revoked device, or fails.
+   */
+  keys?: "ok" | "old" | "revoked" | "broken";
+  /** Makes the key the machine issues (and the fake API accepts). */
+  issue?: () => string;
   /** Answers for other scripts (e.g. an update's); undefined falls through. */
   scripts?: (script: string) => RunResult | undefined;
 }
@@ -128,7 +135,19 @@ function fakeSsh(o: FakeOpts) {
       if (script.includes("@missing")) {
         if (o.servedev === "missing") return { code: 0, stdout: "@missing\n", stderr: "" };
         const status = o.servedev === "stopped" ? "daemon not running" : `daemon 0.2.0 running (pid 42) at http://127.0.0.1:7777; log: x`;
-        return { code: 0, stdout: `welcome!\n@path /home/me/.local/bin/servedev\n@version 0.2.0\n@status ${status}\n@home /home/me/.servedev\n@token ${o.token ?? "tok"}\n`, stderr: "" };
+        const head = `welcome!\n@path /home/me/.local/bin/servedev\n@version 0.2.0\n@status ${status}\n@home /home/me/.servedev\n`;
+        const token = `@token ${o.token ?? "tok"}\n`;
+        if (!script.includes("keys issue")) return { code: 0, stdout: head + token, stderr: "" };
+        const keys = o.keys ?? "ok";
+        const tail =
+          keys === "ok"
+            ? `@key ${o.issue?.() ?? "sdk_x"}\n`
+            : keys === "old"
+              ? `@keyerror servedev: Unknown option '--hub-id'.\n@legacy\n${token}`
+              : keys === "revoked"
+                ? `@revoked me (abcdef01) was revoked; allow it again first\n`
+                : `@keyerror servedev: EACCES: permission denied, open '/home/me/.servedev/device-keys.json'\n`;
+        return { code: 0, stdout: head + tail, stderr: "" };
       }
       return { code: 127, stdout: "", stderr: `unexpected: ${command}` };
     },
@@ -161,6 +180,8 @@ function fakeRemote(
   extra?: (req: Request, url: URL) => Response | undefined | Promise<Response | undefined>,
 ) {
   const hosts: string[] = [];
+  /** What it accepts as x-servedev-token: its own token, and the keys it issued. */
+  const valid = new Set([token]);
   /** "<path> <x-servedev-hub> <x-servedev-hub-id>" for every request. */
   const hubHeaders: string[] = [];
   const streams: ReadableStreamDefaultController[] = [];
@@ -174,7 +195,7 @@ function fakeRemote(
       if (req.headers.get("host") !== "127.0.0.1:7777") return new Response("forbidden host", { status: 403 });
       const p = new URL(req.url).pathname;
       if (p === "/api/health") return Response.json({ ok: true, version: "0.2.0", pid: 42 });
-      if (req.headers.get("x-servedev-token") !== token) return Response.json({ error: "missing or invalid token" }, { status: 401 });
+      if (!valid.has(req.headers.get("x-servedev-token") ?? "")) return Response.json({ error: "missing or invalid token" }, { status: 401 });
       if (p === "/api/servers") return Response.json({ servers });
       if (p === "/api/stream/events") {
         const stream = new ReadableStream({
@@ -194,7 +215,7 @@ function fakeRemote(
   const send = (event: string, data: unknown) => streams.forEach((c) => c.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)));
   /** Its daemon going away: every event stream ends. */
   const endStreams = () => streams.splice(0).forEach((c) => c.close());
-  return { port: srv.port!, hosts, hubHeaders, send, endStreams, servers };
+  return { port: srv.port!, hosts, hubHeaders, send, endStreams, servers, valid };
 }
 
 function memorySecrets(): SecretStore & { data: Map<string, string> } {
@@ -214,15 +235,22 @@ function fakePorts(apiPort: number, reserved: Set<number>, opts: { busy?: number
 
 function machine(name: string, o: FakeOpts & { secrets?: SecretStore; ports?: PortProbe; extra?: Parameters<typeof fakeRemote>[2]; hubName?: string; hubId?: string } = {}) {
   const remote = fakeRemote(o.token ?? "tok", undefined, o.extra);
-  const ssh = fakeSsh({ servedev: "ok", ...o });
+  const issued: string[] = [];
+  const issue = () => {
+    const key = `sdk_${name}${issued.length + 1}`;
+    issued.push(key);
+    remote.valid.add(key);
+    return key;
+  };
+  const ssh = fakeSsh({ servedev: "ok", issue, ...o });
   const secrets = o.secrets ?? memorySecrets();
   const reserved = new Set<number>();
-  const m = new Machine(name, { ssh: "me@pc" }, { dir: tmp(), secrets, hubVersion: "0.2.0", hubName: o.hubName, hubId: o.hubId, reserved, spawner: ssh.spawner, ports: o.ports ?? fakePorts(remote.port, reserved) });
+  const m = new Machine(name, { ssh: "me@pc" }, { dir: tmp(), secrets, hubVersion: "0.2.0", hubName: o.hubName ?? "mac", hubId: o.hubId ?? "abcdef0123456789", reserved, spawner: ssh.spawner, ports: o.ports ?? fakePorts(remote.port, reserved) });
   cleanups.push(() => m.dispose());
-  return { m, ssh, remote, secrets };
+  return { m, ssh, remote, secrets, issued };
 }
 
-test("connecting to a Windows PC: WSL detected, servedev found, token saved, API through the tunnel with its own Host", async () => {
+test("connecting to a Windows PC: WSL detected, servedev found, an access key issued and saved, API through SSH with its own Host", async () => {
   const { m, ssh, remote, secrets } = machine("pc", { windows: true });
   const steps = await m.connect();
   expect(steps.map((s) => [s.id, s.status])).toEqual([
@@ -234,7 +262,11 @@ test("connecting to a Windows PC: WSL detected, servedev found, token saved, API
   ]);
   expect(m.status.state).toBe("connected");
   expect(m.config).toMatchObject({ kind: "wsl", distro: "Ubuntu" });
-  expect(secrets.get("pc")).toBe("tok");
+  // The machine issued this hub its own key (asked for over SSH, through wsl.exe); its token stayed there.
+  expect(secrets.get("pc")).toBe("sdk_pc1");
+  expect(steps.find((s) => s.id === "token")?.detail).toBe("issued to mac over SSH, kept in here (not in config.json)");
+  expect(steps.find((s) => s.id === "api")?.detail).toStartWith("a test request with the access key worked");
+  expect(ssh.calls.some((a) => a.at(-1)!.startsWith("wsl.exe") && decodeWsl(a.at(-1)!).includes("servedev keys issue --hub-id 'abcdef0123456789' --name 'mac'"))).toBe(true);
   expect(remote.hosts.every((h) => h === "127.0.0.1:7777")).toBe(true);
   expect([...m.servers.keys()]).toEqual(["demo:api"]);
   // Every command after detection went through wsl.exe; a session holds WSL up.
@@ -279,23 +311,73 @@ test("ssh refused: the first step fails with ssh's reason and a hint", async () 
   expect(steps[0].hint).toContain("authorized_keys");
 });
 
-test("reconnecting with a saved token runs nothing on the machine; a changed token is read again", async () => {
+test("reconnecting with a saved access key runs nothing on the machine; a rejected one gets a new key over SSH", async () => {
   const secrets = memorySecrets();
-  const { m, ssh } = machine("pc", { secrets, token: "new" });
+  const { m, ssh, remote } = machine("pc", { secrets });
   m.remotePort = 7777;
-  secrets.set("pc", "new");
+  remote.valid.add("sdk_saved");
+  secrets.set("pc", "sdk_saved");
   let steps = await m.connect();
-  expect(steps.find((s) => s.id === "token")?.detail).toBe("the saved token works");
+  expect(steps.find((s) => s.id === "token")?.detail).toBe("the saved access key works (kept in here (not in config.json))");
   expect(ssh.calls.some((a) => a.at(-1)!.includes("@missing"))).toBe(false);
 
-  // The machine's token changed: 401 with the saved one, so setup reads it again.
-  const again = machine("pc2", { secrets, token: "fresh" });
+  // Revoked or replaced there: 401 with the saved key, so setup has a new one issued.
+  const again = machine("pc2", { secrets });
   again.m.remotePort = 7777;
-  secrets.set("pc2", "stale");
+  secrets.set("pc2", "sdk_stale");
   steps = await again.m.connect();
-  expect(steps.find((s) => s.id === "token")?.detail).toContain("changed");
-  expect(secrets.get("pc2")).toBe("fresh");
+  expect(steps.find((s) => s.id === "token")?.status).toBe("ok");
+  expect(secrets.get("pc2")).toBe("sdk_pc21");
   expect(again.m.status.state).toBe("connected");
+});
+
+test("an older servedev there can't issue keys: its own token is read instead, with a warning to update it", async () => {
+  const { m, secrets } = machine("pc", { keys: "old" });
+  const steps = await m.connect();
+  const token = steps.find((s) => s.id === "token")!;
+  expect(token.status).toBe("warning");
+  expect(token.detail).toContain("using pc's own token");
+  expect(token.detail).toContain("too old to issue access keys");
+  expect(token.hint).toContain("servedev remote update pc");
+  expect(secrets.get("pc")).toBe("tok");
+  expect(steps.find((s) => s.id === "api")?.detail).toStartWith("a test request with its token worked");
+  expect(m.status.state).toBe("connected");
+
+  // A saved token (not a key) isn't used as is: each reconnect asks again, so an updated machine issues a key.
+  const later = machine("pc", { secrets });
+  later.m.remotePort = 7777;
+  const again = await later.m.connect();
+  expect(again.find((s) => s.id === "token")?.detail).toBe("issued to mac over SSH, kept in here (not in config.json)");
+  expect(secrets.get("pc")).toBe("sdk_pc1");
+});
+
+test("a revoked device isn't let in (and its token isn't read); a key that can't be issued fails with why", async () => {
+  const { m, ssh } = machine("pc", { keys: "revoked" });
+  let steps = await m.connect();
+  const token = steps.find((s) => s.id === "token")!;
+  expect(token).toMatchObject({ status: "failed", detail: "pc revoked mac's access" });
+  expect(token.hint).toContain("servedev keys allow abcdef01");
+  expect(steps.find((s) => s.id === "api")?.status).toBe("skipped");
+  expect(m.status.state).not.toBe("connected");
+  expect(ssh.calls.length).toBeGreaterThan(0);
+
+  const broken = machine("pc2", { keys: "broken" });
+  steps = await broken.m.connect();
+  expect(steps.find((s) => s.id === "token")).toMatchObject({ status: "failed" });
+  expect(steps.find((s) => s.id === "token")?.detail).toContain("couldn't issue an access key for mac: servedev: EACCES");
+  expect(broken.secrets.get("pc2")).toBeUndefined();
+});
+
+test("a hub without an id reads the token, as before", async () => {
+  const remote = fakeRemote();
+  const ssh = fakeSsh({ servedev: "ok", issue: () => "sdk_never" });
+  const reserved = new Set<number>();
+  const secrets = memorySecrets();
+  const m = new Machine("pc", { ssh: "me@pc" }, { dir: tmp(), secrets, hubVersion: "0.2.0", reserved, spawner: ssh.spawner, ports: fakePorts(remote.port, reserved) });
+  cleanups.push(() => m.dispose());
+  await m.connect();
+  expect(ssh.calls.some((a) => a.at(-1)!.includes("keys issue"))).toBe(false);
+  expect(secrets.get("pc")).toBe("tok");
 });
 
 test("live updates: server events from the machine update its servers; losing ssh starts reconnecting", async () => {
@@ -472,19 +554,28 @@ test("checklist: a failed step skips the rest", async () => {
   });
   expect(await c.step("token", async () => ({}))).toBe(false);
   expect(c.result()).toEqual([
-    { id: "ssh", label: "SSH connection", status: "ok", detail: "ok", hint: undefined },
-    { id: "os", label: "Operating system", status: "warning", detail: "Linux; odd", hint: undefined },
-    { id: "servedev", label: "servedev installed and running", status: "failed", detail: "not found", hint: "install it" },
-    { id: "token", label: "API token", status: "skipped" },
-    { id: "api", label: "servedev API through the tunnel", status: "skipped" },
+    { id: "ssh", label: "Connects over SSH", status: "ok", detail: "ok", hint: undefined },
+    { id: "os", label: "System", status: "warning", detail: "Linux; odd", hint: undefined },
+    { id: "servedev", label: "servedev is installed and running", status: "failed", detail: "not found", hint: "install it" },
+    { id: "token", label: "Access key", status: "skipped" },
+    { id: "api", label: "Reaches servedev through SSH", status: "skipped" },
   ]);
 });
 
 test("servedev probe output", () => {
-  expect(parseServedevProbe("motd\n@missing\n")).toEqual({ missing: true, running: false });
+  expect(parseServedevProbe("motd\n@missing\n")).toEqual({ missing: true, running: false, legacy: false });
   const p = parseServedevProbe("@path /x/servedev\n@version 0.2.0\n@status daemon 0.2.0 running (pid 9) at http://127.0.0.1:7777; log: l\n@home /h\n@token abc\n");
   expect(p).toMatchObject({ missing: false, version: "0.2.0", running: true, port: 7777, token: "abc", home: "/h" });
   expect(parseServedevProbe("@version 0.2.0\n@status daemon not running\n@token \n")).toMatchObject({ running: false, port: undefined, token: undefined });
+  // A key issued to this hub; no token read.
+  expect(parseServedevProbe("@home /h\n@key sdk_abc\n")).toMatchObject({ key: "sdk_abc", token: undefined, legacy: false, revoked: undefined });
+  // Something that isn't a key isn't taken for one.
+  expect(parseServedevProbe("@key hello\n").key).toBeUndefined();
+  expect(parseServedevProbe("@revoked mac (abcdef01) was revoked\n").revoked).toBe("mac (abcdef01) was revoked");
+  expect(parseServedevProbe("@keyerror servedev: Unknown option '--hub-id'.\n@legacy\n@token t\n")).toMatchObject({ legacy: true, token: "t", keyError: "servedev: Unknown option '--hub-id'." });
+  expect(parseServedevProbe("@keyerror disk full\n")).toMatchObject({ legacy: false, token: undefined, keyError: "disk full" });
+  // Tags match whole words: @keyerror isn't @key.
+  expect(parseServedevProbe("@keyerror x\n").key).toBeUndefined();
 });
 
 test("SSE parsing across chunk boundaries", () => {

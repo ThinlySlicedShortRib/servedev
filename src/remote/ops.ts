@@ -1,6 +1,7 @@
 /** `servedev remote ...`: adding, listing and repairing other machines (for the CLI and agents). */
 import { api } from "../client";
 import { ago, table, type OpResult } from "../ops";
+import { shortHubId, type DeviceKeyView } from "./device-keys";
 import { otherHubsWarning } from "./hubs";
 import type { MachineSummary, SetupStep } from "./types";
 import { compareVersions, type UpdateReport } from "./update";
@@ -65,7 +66,7 @@ export async function opRemoteList(): Promise<OpResult> {
 
 export async function opRemoteRemove(name: string): Promise<OpResult> {
   const r = await api<{ removed: string }>("/api/machines/remove", { name });
-  return { ok: true, text: `removed ${r.removed}: disconnected, and its token and cached servers deleted here. Nothing changed on ${r.removed} itself.`, data: r };
+  return { ok: true, text: `removed ${r.removed}: disconnected, and its access key and cached servers deleted here. Nothing changed on ${r.removed} itself.`, data: r };
 }
 
 export async function opRemoteReconnect(name: string): Promise<OpResult> {
@@ -117,4 +118,55 @@ export async function opRemoteBoot(a: { name: string; install?: boolean }): Prom
   }
   lines.push("", r.powershell ?? "");
   return { ok: !a.install || !!r.installed, text: lines.join("\n"), data: r };
+}
+
+// ---------- devices' access keys (this machine as the one being controlled) ----------
+
+interface KeysResponse {
+  keys: DeviceKeyView[];
+  connected?: { id: string | null }[];
+}
+
+function keyRows(keys: DeviceKeyView[], connected: Set<string>): string {
+  const rows = [["DEVICE", "HUB ID", "ADDED", "LAST USED", "STATE"]];
+  for (const k of keys) {
+    rows.push([
+      k.name,
+      shortHubId(k.hubId),
+      `${ago(k.created)} ago`,
+      k.lastUsed ? `${ago(k.lastUsed)} ago` : "never",
+      k.revoked ? `revoked ${ago(k.revoked)} ago` : connected.has(k.hubId) ? "connected" : "can connect",
+    ]);
+  }
+  return table(rows);
+}
+
+export async function opKeysList(): Promise<OpResult> {
+  const r = await api<KeysResponse>("/api/device-keys");
+  if (!r.keys.length) {
+    return { ok: true, text: "No other devices can control this computer. One gets an access key when it adds this machine (servedev remote add <name> <user@host> there).", data: r };
+  }
+  const connected = new Set((r.connected ?? []).flatMap((h) => (h.id ? [h.id] : [])));
+  return {
+    ok: true,
+    text: `Devices that can control this computer:\n${keyRows(r.keys, connected)}\n\nRevoke one with: servedev keys revoke <device or hub id>`,
+    data: r,
+  };
+}
+
+export async function opKeysRevoke(hub: string): Promise<OpResult> {
+  const r = await api<KeysResponse & { revoked: DeviceKeyView[] }>("/api/device-keys/revoke", { hub });
+  const names = r.revoked.map((k) => `${k.name} (${shortHubId(k.hubId)})`).join(", ");
+  return {
+    ok: true,
+    text: `Revoked ${names}: its access key stopped working, and it can't get a new one until you allow it again (servedev keys allow ${r.revoked[0] ? shortHubId(r.revoked[0].hubId) : hub}). ` +
+      `It can still sign in over SSH; to shut it out entirely, also remove its key from ~/.ssh/authorized_keys.`,
+    data: r,
+  };
+}
+
+export async function opKeysAllow(hub: string): Promise<OpResult> {
+  const r = await api<KeysResponse & { allowed: DeviceKeyView[] }>("/api/device-keys/allow", { hub });
+  const names = r.allowed.map((k) => `${k.name} (${shortHubId(k.hubId)})`).join(", ");
+  return { ok: true, text: `${names} can get an access key again; it gets one the next time it connects (servedev remote reconnect <this machine> there).`, data: r };
 }

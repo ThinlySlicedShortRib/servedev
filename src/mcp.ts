@@ -43,7 +43,7 @@ import {
   opDirs,
   type OpResult,
 } from "./ops";
-import { opRemoteList, opRemoteReconnect, opRemoteUpdate } from "./remote/ops";
+import { opKeysAllow, opKeysList, opKeysRevoke, opRemoteList, opRemoteReconnect, opRemoteUpdate } from "./remote/ops";
 import { api } from "./client";
 import { VERSION } from "./paths";
 
@@ -285,6 +285,25 @@ export const TOOLS = [
       "its servers keep running. Refuses a checkout with uncommitted changes or one that can't fast-forward. Reports commits and versions before and after, " +
       "then the reconnect checklist. Only when the user asked, or list_machines shows its version differs and the user agrees.",
     inputSchema: obj({ machine: { type: "string" } }, ["machine"]),
+  },
+  {
+    name: "list_device_keys",
+    description:
+      "Devices (other machines' servedev) that can control THIS computer, each with its own access key: name, hub id, when it was added and last used, " +
+      "and whether it's connected or revoked. A device gets a key when it adds this machine over SSH.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "revoke_device_key",
+    description:
+      "Revoke a device's access to this computer (by its name or hub id, see list_device_keys): its key stops working at once and it can't get a new one " +
+      "until allowed again. Only when the user asked.",
+    inputSchema: obj({ device: { type: "string", description: "The device's name or hub id (or the start of it)." } }, ["device"]),
+  },
+  {
+    name: "allow_device_key",
+    description: "Let a revoked device get an access key again; it gets one the next time it connects. Only when the user asked.",
+    inputSchema: obj({ device: { type: "string", description: "The revoked device's name or hub id." } }, ["device"]),
   },
   // ---------- several servers ----------
   {
@@ -643,6 +662,12 @@ export async function callTool(name: string, a: Args): Promise<OpResult> {
       return opRemoteReconnect(String(a.machine ?? ""));
     case "update_machine":
       return opRemoteUpdate(String(a.machine ?? ""));
+    case "list_device_keys":
+      return opKeysList();
+    case "revoke_device_key":
+      return opKeysRevoke(String(a.device ?? ""));
+    case "allow_device_key":
+      return opKeysAllow(String(a.device ?? ""));
     case "server_logs":
       return opLogs({ cwd, name: ref(), tail: a.lines, grep: a.grep, since: a.since, prev: a.previous_run, run: a.run });
     case "search_logs":

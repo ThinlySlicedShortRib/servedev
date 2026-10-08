@@ -14,7 +14,8 @@ import { hostAliases } from "./ids";
 import type { LongProc, Spawner } from "./process";
 import type { SecretStore } from "./secrets";
 import { otherHubs, otherHubsWarning } from "./hubs";
-import { Checklist, SERVEDEV_PROBE, StepError, missingHint, parseServedevProbe } from "./setup";
+import { isDeviceKey, shortHubId } from "./device-keys";
+import { Checklist, StepError, missingHint, parseServedevProbe, servedevProbe } from "./setup";
 import { readSse } from "./sse";
 import { failed, initial, retryNow, succeeded, type ConnStatus } from "./state";
 import { SshLink, createTransport, detect, type Detected, type Transport } from "./transport";
@@ -165,7 +166,8 @@ export class Machine extends EventEmitter {
 
     await list.step("ssh", async () => {
       await link.open();
-      return { detail: `connected to ${this.config.ssh}` };
+      const ssh = this.config.ssh.replace(/^ssh:\/\//, "");
+      return { detail: `signed ${ssh.includes("@") ? "in as" : "in to"} ${ssh} with your SSH key` };
     });
     await list.step("os", async () => {
       detected = await detect(link, this.config.distro);
@@ -173,10 +175,11 @@ export class Machine extends EventEmitter {
       return { detail: detected.os };
     });
 
-    // Reconnecting: if the daemon answers with the token we have, there's nothing to run there.
+    // Reconnecting: if the daemon answers with the access key we have, there's nothing to run there.
+    // (A machine's own token, saved from an older servedev there, is swapped for a key when it can issue one.)
     const stored = this.deps.secrets.get(this.name);
     let quick: { version: string } | undefined;
-    if (list.ok && stored && this.remotePort) {
+    if (list.ok && stored && isDeviceKey(stored) && this.remotePort) {
       quick = await this.openApi(link, this.remotePort, stored)
         .then((r) => {
           api = r.api;
@@ -191,7 +194,7 @@ export class Machine extends EventEmitter {
         this.version = quick.version;
         return this.versionOutcome(`${quick.version}, answering on port ${this.remotePort}`);
       }
-      const r = await transport!.run(SERVEDEV_PROBE, { timeoutMs: 90_000 });
+      const r = await transport!.run(servedevProbe({ id: this.deps.hubId, name: this.deps.hubName }), { timeoutMs: 90_000 });
       probe = parseServedevProbe(r.stdout);
       if (probe.missing) throw new StepError(`servedev isn't installed on ${this.name}, or isn't on its login shell's PATH`, missingHint(detected?.kind, this.name));
       if (!probe.running) {
@@ -202,12 +205,29 @@ export class Machine extends EventEmitter {
       this.remotePort = probe.port;
       return this.versionOutcome(`${probe.version} running on port ${probe.port} (${probe.path})`);
     });
+    const me = this.deps.hubName ?? "this device";
+    const kept = this.deps.secrets.where?.(this.name) ?? "here (not in config.json)";
+    let legacy = false;
     await list.step("token", async () => {
-      if (quick) return { detail: "the saved token works" };
-      if (!probe!.token) throw new StepError(`couldn't read servedev's token on ${this.name}`, `it should be in ${probe!.home ?? "~/.servedev"}/token there`);
-      if (probe!.token === stored) return { detail: "unchanged" };
-      this.deps.secrets.set(this.name, probe!.token);
-      return { detail: stored ? "it changed on the machine; saved the new one" : "saved (not in config.json)" };
+      if (quick) return { detail: `the saved access key works (kept in ${kept})` };
+      const p = probe!;
+      if (p.revoked !== undefined) {
+        const id = this.deps.hubId ? shortHubId(this.deps.hubId) : me;
+        throw new StepError(`${this.name} revoked ${me}'s access`, `to let it in again, on ${this.name}: servedev keys allow ${id} (or Allow again under "Devices that can control this computer" in its dashboard); then servedev remote reconnect ${this.name}`);
+      }
+      if (p.key) {
+        this.deps.secrets.set(this.name, p.key);
+        return { detail: `issued to ${me} over SSH, kept in ${kept}` };
+      }
+      if (!p.legacy) throw new StepError(`${this.name} couldn't issue an access key for ${me}: ${p.keyError ?? "no answer"}`, `run servedev keys ls on ${this.name} to check its keys file (${p.home ?? "~/.servedev"}/device-keys.json)`);
+      if (!p.token) throw new StepError(`couldn't read servedev's token on ${this.name}`, `it should be in ${p.home ?? "~/.servedev"}/token there`);
+      legacy = true;
+      if (p.token !== stored) this.deps.secrets.set(this.name, p.token);
+      return {
+        detail: `using ${this.name}'s own token, kept in ${kept}`,
+        warning: `its servedev${p.version ? ` ${p.version}` : ""} is too old to issue access keys, so ${me} can't be told apart or revoked there`,
+        hint: `update it to give ${me} its own access key: servedev remote update ${this.name}`,
+      };
     });
     await list.step("api", async () => {
       if (!api) {
@@ -218,7 +238,7 @@ export class Machine extends EventEmitter {
       hubs = await api.call<{ hubs: unknown }>("GET", "/api/hubs", undefined, 10_000).then((r) => otherHubs(r.hubs, this.hubSelf()), () => []);
       const warning = otherHubsWarning(this.name, hubs);
       return {
-        detail: `127.0.0.1:${api.localPort} here → port ${api.remotePort} on ${this.name}`,
+        detail: `a test request with ${legacy ? "its token" : "the access key"} worked (127.0.0.1:${api.localPort} here → port ${api.remotePort} on ${this.name})`,
         warning,
         hint: warning && `only one hub at a time keeps port numbers the same as on ${this.name}; remove it on the other one (servedev remote rm ${this.name}) if you don't need both`,
       };
@@ -260,7 +280,7 @@ export class Machine extends EventEmitter {
     return { detail };
   }
 
-  /** Forward a local port to the remote daemon and check it answers, with this token. */
+  /** Forward a local port to the remote daemon and check it answers, with this access key (or token). */
   private async openApi(link: SshLink, remotePort: number, token: string) {
     const local = await chooseLocalPort(0, this.deps.reserved, this.deps.ports ?? systemPorts);
     await link.forward(local, remotePort);
@@ -273,7 +293,7 @@ export class Machine extends EventEmitter {
       try {
         list = await api.call<{ servers: PublicServer[] }>("GET", "/api/servers", undefined, 20_000);
       } catch (e) {
-        if (e instanceof RemoteApiError && e.status === 401) throw new StepError(`${this.name}'s servedev rejected the token`, `servedev remote reconnect ${this.name} reads it again`);
+        if (e instanceof RemoteApiError && e.status === 401) throw new StepError(`${this.name}'s servedev rejected this device's access key`, `servedev remote reconnect ${this.name} gets a new one over SSH`);
         throw e;
       }
       return { api, health, servers: list.servers };

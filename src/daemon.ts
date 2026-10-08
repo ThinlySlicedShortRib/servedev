@@ -45,6 +45,7 @@ import { BOOT_TASK, bootTaskPowerShell, encodedPowerShell, writeBootScript } fro
 import { readSse } from "./remote/sse";
 import { HUB_HEADER, HUB_ID_HEADER } from "./remote/api";
 import { HubTracker, cleanHubId, cleanHubName, hubId, hubName } from "./remote/hubs";
+import { DeviceKeyError, DeviceKeys, isDeviceKey, sameSecret } from "./remote/device-keys";
 import type { MachineSummary, RemoteServerView, SetupStep } from "./remote/types";
 
 // The dashboard (ui/) builds to a single self-contained HTML file, embedded here as text (bun
@@ -255,6 +256,57 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
   });
   // Hubs whose event streams are open here (this machine is another one's "pc").
   const hubs = new HubTracker();
+  // Their access keys (see remote/device-keys.ts), and their open streams by key hash: closed when
+  // the key is revoked or replaced, here or with the CLI (the file is checked every few seconds).
+  const deviceKeys = new DeviceKeys();
+  const deviceStreams = new Map<string, Set<() => void>>();
+  deviceKeys.onReload = (entries) => {
+    const valid = new Set(entries.flatMap((e) => (e.hash ? [e.hash] : [])));
+    for (const [hash, closers] of deviceStreams) if (!valid.has(hash)) [...closers].forEach((close) => close());
+  };
+  setInterval(() => deviceKeys.current(), 3000).unref();
+  /** A device's response stream (SSE), closed early if its key stops being valid. */
+  function closableStream(res: Response, hash: string): Response {
+    if (!res.body || !res.headers.get("content-type")?.startsWith("text/event-stream")) return res;
+    const reader = res.body.getReader();
+    let done = false;
+    const closers = deviceStreams.get(hash) ?? new Set<() => void>();
+    deviceStreams.set(hash, closers);
+    const release = () => {
+      done = true;
+      closers.delete(close);
+      if (!closers.size && deviceStreams.get(hash) === closers) deviceStreams.delete(hash);
+    };
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    function close() {
+      release();
+      reader.cancel().catch(() => {});
+      try {
+        controller.close();
+      } catch {}
+    }
+    closers.add(close);
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c;
+      },
+      async pull(c) {
+        const r = await reader.read().catch(() => ({ done: true, value: undefined }));
+        if (done) return;
+        if (r.done) {
+          release();
+          try {
+            c.close();
+          } catch {}
+        } else c.enqueue(r.value);
+      },
+      cancel(reason) {
+        release();
+        return reader.cancel(reason);
+      },
+    });
+    return new Response(body, { status: res.status, headers: res.headers });
+  }
   // Facts found while connecting (WSL or not, which distro) are kept in config.json for next time.
   hub.on("detected", (name: string, facts: { kind?: string; distro?: string }) => {
     if (!config.local.machines?.[name]) return;
@@ -1881,6 +1933,15 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     return { pattern: all[0]?.pattern ?? "", searched: all.reduce((n, r) => n + r.searched, 0), results: all.flatMap((r) => r.results) };
   }
 
+  function keyCall<T>(fn: () => T): T {
+    try {
+      return fn();
+    } catch (e) {
+      if (e instanceof DeviceKeyError) throw new HttpError(e.status, e.message);
+      throw e;
+    }
+  }
+
   async function handle(req: Request, url: URL): Promise<Response | object> {
     const p = url.pathname;
     const q = url.searchParams;
@@ -1906,6 +1967,10 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
     if (p === "/api/machines/boot" && req.method === "POST") return bootTask(String(body.name ?? ""), !!body.install);
     if (p === "/api/machines/update" && req.method === "POST") return hub.update(String(body.name ?? ""));
     if (p === "/api/hubs" && req.method === "GET") return { hubs: hubs.list() };
+    // Devices' access keys (only with this machine's own token; see the fetch handler).
+    if (p === "/api/device-keys" && req.method === "GET") return { keys: deviceKeys.list(), connected: hubs.list() };
+    if (p === "/api/device-keys/revoke" && req.method === "POST") return { revoked: keyCall(() => deviceKeys.revoke(String(body.hub ?? ""))), keys: deviceKeys.list() };
+    if (p === "/api/device-keys/allow" && req.method === "POST") return { allowed: keyCall(() => deviceKeys.allow(String(body.hub ?? ""))), keys: deviceKeys.list() };
     if (p === "/api/pin" && req.method === "POST") {
       const s = resolveRef(body.root, body.id ?? body.name, true);
       const on = body.pinned !== false;
@@ -2465,12 +2530,24 @@ export async function runDaemon(opts: { autostart?: boolean } = {}) {
         return Response.json(url.pathname.includes("servedev.") ? repoSchema : localSchema);
       }
       if (!url.pathname.startsWith("/api/")) return new Response("not found", { status: 404 });
+      // This machine's own token (its dashboard, CLI and MCP), or an access key issued to another
+      // machine's servedev, sent with that machine's hub id.
+      let device: string | undefined;
       if (url.pathname !== "/api/health") {
-        const given = req.headers.get("x-servedev-token") ?? url.searchParams.get("token");
-        if (given !== token) return Response.json({ error: "missing or invalid token" }, { status: 401 });
+        const given = req.headers.get("x-servedev-token") ?? url.searchParams.get("token") ?? "";
+        if (isDeviceKey(given)) {
+          const v = deviceKeys.verify(given, req.headers.get(HUB_ID_HEADER));
+          if (!v.ok) return Response.json({ error: v.reason }, { status: 401 });
+          if (url.pathname.startsWith("/api/device-keys")) {
+            return Response.json({ error: "managing access keys takes this machine's own servedev (its dashboard or CLI), not another device" }, { status: 403 });
+          }
+          device = v.hash;
+          deviceKeys.touch(v.hash);
+        } else if (!sameSecret(given, token)) return Response.json({ error: "missing or invalid token" }, { status: 401 });
       }
       try {
         const result = await handle(req, url);
+        if (device && result instanceof Response) return closableStream(result, device);
         return result instanceof Response ? result : Response.json(result);
       } catch (e) {
         const status = statusOf(e);

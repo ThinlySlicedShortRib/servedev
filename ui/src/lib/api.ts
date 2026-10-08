@@ -68,6 +68,16 @@ export interface SetupStep {
   hint?: string
 }
 
+/** Another machine's servedev with its own access key to this one (GET /api/device-keys). */
+export interface DeviceKey {
+  hubId: string
+  name: string
+  created: number
+  lastUsed?: number
+  /** Its key was revoked then; it can't get a new one until allowed again. */
+  revoked?: number
+}
+
 /** Another machine whose servers this servedev relays (GET /api/machines; "machine" events). */
 export interface Machine {
   name: string

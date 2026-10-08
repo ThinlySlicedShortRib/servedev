@@ -30,6 +30,7 @@ Ideas to look into before deciding.
 
 ## Done
 
+- 2026-10-09: Per-device access keys: each hub gets its own key from a machine over SSH (`servedev keys issue`), so the machine's token never leaves it; devices are listed and revoked with `servedev keys`, the MCP tools and the Machines sheet ("Devices that can control this computer"). Older machines fall back to their token with a warning. Clearer checklist wording (Connects over SSH, System, Access key, Reaches servedev through SSH).
 - 2026-10-07: A rebuild never removes the dashboard file, so dev mode survives `bun run build`; a daemon with no dashboard build serves a short page instead of failing.
 - 2026-10-07: `servedev remote update` rebuilds a source checkout's own dashboard when `ui/` changed (with `npm ci`, so the checkout stays clean).
 - 2026-10-07: A stop command keeps the run's account variables across a daemon restart (saved only while the run lasts, readable only by you).
