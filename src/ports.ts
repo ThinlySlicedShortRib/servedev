@@ -1,93 +1,13 @@
-import fs from "node:fs";
 import net from "node:net";
+import { platform, type Listener, type Proc } from "./platform";
 
-export interface Listener {
-  pid: number;
-  pgid: number;
-  command: string;
-  port: number;
-}
+export type { Listener, Proc };
+// The posix parsers, where they've always been importable from.
+export { parseLsof, parsePs, parseSs } from "./platform/posix";
 
-/** All TCP ports in LISTEN state owned by the current user, via lsof (and ss on Linux). */
-export async function listeners(): Promise<Listener[]> {
-  const [lsof, ss] = await Promise.all([
-    run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pgcn"]),
-    process.platform === "linux" ? run(["ss", "-ltnpH"]) : Promise.resolve(""),
-  ]);
-  const found = parseLsof(lsof);
-  // Linux lsof leaves out processes whose name has a space and parentheses (Next 16's
-  // "next-server (v16.3.8)"); ss lists them, so add what lsof missed.
-  const seen = new Set(found.map((l) => `${l.pid}:${l.port}`));
-  for (const l of parseSs(ss, pgidOf)) if (!seen.has(`${l.pid}:${l.port}`)) found.push(l);
-  return found;
-}
-
-async function run(cmd: string[]): Promise<string> {
-  try {
-    const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore" });
-    const out = await new Response(proc.stdout).text();
-    await proc.exited;
-    return out;
-  } catch {
-    // not installed
-    return "";
-  }
-}
-
-/** A process's group from /proc (Linux); its name can hold spaces and ")", so read after the last ")". */
-function pgidOf(pid: number): number {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
-    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]) || pid;
-  } catch {
-    return pid;
-  }
-}
-
-/**
- * `ss -ltnpH` lines: `LISTEN 0 511 *:3000 *:* users:(("next-server (v1",pid=20994,fd=22))`.
- * Only your own processes show their pid, which is all servedev needs.
- */
-export function parseSs(out: string, pgid: (pid: number) => number): Listener[] {
-  const result: Listener[] = [];
-  const seen = new Set<string>();
-  for (const line of out.split("\n")) {
-    const local = line.trim().split(/\s+/)[3];
-    const port = local ? Number(local.slice(local.lastIndexOf(":") + 1)) : 0;
-    if (!port) continue;
-    for (const m of line.matchAll(/\("((?:[^"\\]|\\.)*)",pid=(\d+),fd=\d+\)/g)) {
-      const pid = Number(m[2]);
-      const key = `${pid}:${port}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push({ pid, pgid: pgid(pid), command: m[1], port });
-    }
-  }
-  return result;
-}
-
-export function parseLsof(out: string): Listener[] {
-  const result: Listener[] = [];
-  const seen = new Set<string>();
-  let pid = 0;
-  let pgid = 0;
-  let command = "";
-  for (const line of out.split("\n")) {
-    const tag = line[0];
-    const value = line.slice(1);
-    if (tag === "p") pid = Number(value);
-    else if (tag === "g") pgid = Number(value);
-    else if (tag === "c") command = value;
-    else if (tag === "n") {
-      const port = Number(value.slice(value.lastIndexOf(":") + 1));
-      const key = `${pid}:${port}`;
-      if (port && !seen.has(key)) {
-        seen.add(key);
-        result.push({ pid, pgid, command, port });
-      }
-    }
-  }
-  return result;
+/** All TCP ports in LISTEN state owned by the current user. */
+export function listeners(): Promise<Listener[]> {
+  return platform.listeners();
 }
 
 export function canBind(port: number): Promise<boolean> {
@@ -120,28 +40,9 @@ export function tcpOpen(port: number, timeoutMs = 500): Promise<boolean> {
   });
 }
 
-export interface Proc {
-  pid: number;
-  ppid: number;
-  pgid: number;
-  command: string;
-}
-
-/** Every process on the machine, from ps. */
-export async function processTable(): Promise<Proc[]> {
-  const proc = Bun.spawn(["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,command="], { stdout: "pipe", stderr: "ignore" });
-  const out = await new Response(proc.stdout).text();
-  await proc.exited;
-  return parsePs(out);
-}
-
-export function parsePs(out: string): Proc[] {
-  const procs: Proc[] = [];
-  for (const line of out.split("\n")) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (m) procs.push({ pid: +m[1], ppid: +m[2], pgid: +m[3], command: m[4].trim() });
-  }
-  return procs;
+/** Every process on the machine. */
+export function processTable(): Promise<Proc[]> {
+  return platform.processTable();
 }
 
 /**

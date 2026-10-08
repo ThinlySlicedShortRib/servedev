@@ -8,7 +8,7 @@ Principle: agents add and edit most servers, and they already know the commands.
 
 Committed to; roughly in order.
 
-- **Native Windows (no WSL).** [Plan](plans/windows.md). Phase 0 (platform layer) in progress; phases 1–3 wait on the open decisions in the plan.
+- **Native Windows (no WSL).** [Plan](plans/windows.md). Phase 0 (platform layer) done; phases 1–3 wait on the open decisions in the plan.
 
 ## Improvements
 
@@ -30,6 +30,7 @@ Ideas to look into before deciding.
 
 ## Done
 
+- 2026-10-09: Platform layer: everything that depends on the local OS (ports, process table, spawning and stopping process groups, login environment, default home, folder picker, autostart) goes through one `Platform` interface in `src/platform/`, with today's code in `posix.ts` and a `windows.ts` stub; no behavior change.
 - 2026-10-07: A rebuild never removes the dashboard file, so dev mode survives `bun run build`; a daemon with no dashboard build serves a short page instead of failing.
 - 2026-10-07: `servedev remote update` rebuilds a source checkout's own dashboard when `ui/` changed (with `npm ci`, so the checkout stays clean).
 - 2026-10-07: A stop command keeps the run's account variables across a daemon restart (saved only while the run lasts, readable only by you).

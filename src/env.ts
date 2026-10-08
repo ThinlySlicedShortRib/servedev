@@ -1,4 +1,7 @@
-import os from "node:os";
+import { platform } from "./platform";
+
+// Where it's always been importable from.
+export { parseEnvOutput } from "./platform/posix";
 
 /**
  * Server environments. A server stores only the variables someone set on purpose (--env, the
@@ -41,45 +44,14 @@ export function maskValue(v: string): string {
 let loginEnv: Record<string, string> | undefined;
 let loginAt = 0;
 let pending: Promise<Record<string, string>> | undefined;
-const MARK = "__servedev_env__";
-
-/** Parse `env -0` output after the marker (rc files may print banners before it). */
-export function parseEnvOutput(out: string): Record<string, string> {
-  const at = out.indexOf(MARK);
-  if (at < 0) return {};
-  const env: Record<string, string> = {};
-  for (const entry of out.slice(at + MARK.length).split("\0")) {
-    const i = entry.indexOf("=");
-    if (i > 0) env[entry.slice(0, i).replace(/^\n/, "")] = entry.slice(i + 1);
-  }
-  return env;
-}
 
 /**
- * What a new terminal would have: the user's login shell started from a near-empty environment
- * (so the daemon's own environment, e.g. from whichever agent launched it, doesn't leak in).
+ * What a new terminal would have (see Platform.loginShellEnv), minus terminal/session noise.
  * Falls back to the daemon's environment minus noise if the shell fails or hangs.
  */
 async function captureLoginEnv(): Promise<Record<string, string>> {
-  const shell = process.env.SHELL || "/bin/zsh";
-  const seed: Record<string, string> = {
-    HOME: os.homedir(),
-    USER: os.userInfo().username,
-    LOGNAME: os.userInfo().username,
-    SHELL: shell,
-    TMPDIR: process.env.TMPDIR ?? os.tmpdir(),
-    TERM: "xterm-256color",
-    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-  };
-  if (process.env.LANG) seed.LANG = process.env.LANG;
   try {
-    const proc = Bun.spawn([shell, "-ilc", `printf '%s' '${MARK}'; env -0`], { env: seed, stdin: "ignore", stdout: "pipe", stderr: "ignore", cwd: os.homedir() });
-    const timer = setTimeout(() => proc.kill(), 8000);
-    const out = await new Response(proc.stdout).text();
-    clearTimeout(timer);
-    await proc.exited;
-    const env = parseEnvOutput(out);
-    if (!env.PATH) throw new Error("no PATH from the login shell");
+    const env = await platform.loginShellEnv();
     for (const k of Object.keys(env)) if (isNoisy(k)) delete env[k];
     // The agent socket is per login session, not per shell; keep the daemon's so git over ssh works.
     if (process.env.SSH_AUTH_SOCK) env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK;
