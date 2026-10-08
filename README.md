@@ -202,6 +202,8 @@ The API requires a token (`~/.servedev/token`) and rejects foreign `Host`/`Origi
 
 Environment: `SERVEDEV_HOME` (default `~/.servedev`), `SERVEDEV_PORT` (default `7777`).
 
+Everything that depends on the OS servedev runs on (finding ports and processes, starting servers in a group and stopping it, the login environment, the default home, the folder picker, login autostart) goes through one `Platform` interface in `src/platform/`: `posix.ts` for macOS and Linux (lsof/ss, ps, `sh -c`, SIGTERM then SIGKILL, a LaunchAgent), `windows.ts` for native Windows (a stub so far). Commands servedev builds for *other* machines (`src/remote/`) depend on that machine's OS and don't go through it.
+
 ## Development
 
 ```sh

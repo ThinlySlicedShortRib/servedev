@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { clean, fileSize, readFrom } from "./logs";
 import { DB_FILE, LOG_DIR, STATE_FILE, ensureHome } from "./paths";
+import { platform } from "./platform";
 import { discoverGroups, findFreePort, listeners, processTable, tcpOpen } from "./ports";
 import type { Selections } from "./accounts/registry";
 import type { ServerDef } from "./config";
@@ -168,23 +169,11 @@ export function pickPrimaryPort(s: Pick<Server, "portSpec" | "port" | "ready" | 
 }
 
 export function groupAlive(pgid: number | undefined): boolean {
-  if (!pgid) return false;
-  try {
-    process.kill(-pgid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
+  return platform.groupAlive(pgid);
 }
 
 function shq(s: string) {
   return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
-function signalGroup(pgid: number, sig: NodeJS.Signals) {
-  try {
-    process.kill(-pgid, sig);
-  } catch {}
 }
 
 function groupsOf(s: Server): number[] {
@@ -196,8 +185,8 @@ export function serverAlive(s: Server): boolean {
   return groupsOf(s).some(groupAlive);
 }
 
-function signalServer(s: Server, sig: NodeJS.Signals) {
-  for (const g of groupsOf(s)) signalGroup(g, sig);
+function signalServer(s: Server, how: "graceful" | "force") {
+  platform.signalGroups(groupsOf(s), how);
 }
 
 export class Manager extends EventEmitter {
@@ -475,7 +464,7 @@ export class Manager extends EventEmitter {
     const out = fs.openSync(logFile, "a");
     let child: ChildProcess;
     try {
-      child = spawn("/bin/sh", ["-c", script], { cwd: spec.cwd, env, detached: true, stdio: ["ignore", out, out] });
+      child = platform.spawnShell(script, { cwd: spec.cwd, env, stdio: ["ignore", out, out] });
     } finally {
       fs.closeSync(out);
     }
@@ -520,7 +509,7 @@ export class Manager extends EventEmitter {
     rt.env = rt.accountEnv = undefined;
     if (s.runId) this.store.setStopEnv(s.runId, undefined);
     // Take down any stragglers left in its groups.
-    signalServer(s, "SIGKILL");
+    signalServer(s, "force");
     const reason = wasStopping
       ? "stopped"
       : s.status === "exited"
@@ -540,12 +529,7 @@ export class Manager extends EventEmitter {
     this.trackGroups(s, await processTable());
     this.changed(s);
     if (s.stop) await this.runStopCommand(s);
-    signalServer(s, "SIGTERM");
-    for (let i = 0; i < 50 && serverAlive(s); i++) await Bun.sleep(100);
-    if (serverAlive(s)) {
-      signalServer(s, "SIGKILL");
-      for (let i = 0; i < 20 && serverAlive(s); i++) await Bun.sleep(100);
-    }
+    await platform.stopGroups(() => groupsOf(s));
     this.finalize(s, gen);
     return s;
   }
@@ -581,14 +565,14 @@ export class Manager extends EventEmitter {
       let child: ChildProcess;
       try {
         // In a group of its own, so a timeout takes down whatever it started.
-        child = spawn("/bin/sh", ["-c", s.stop!], { cwd: s.cwd, env, detached: true, stdio: ["ignore", out, out] });
+        child = platform.spawnShell(s.stop!, { cwd: s.cwd, env, stdio: ["ignore", out, out] });
       } catch (e) {
         return resolve((e as Error).message);
       } finally {
         if (typeof out === "number") fs.closeSync(out);
       }
       const timer = setTimeout(() => {
-        if (child.pid) signalGroup(child.pid, "SIGKILL");
+        if (child.pid) platform.signalGroups([child.pid], "force");
         resolve(`still running after ${STOP_COMMAND_MS / 1000}s`);
       }, STOP_COMMAND_MS);
       child.on("error", (e) => {

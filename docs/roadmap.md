@@ -8,7 +8,7 @@ Principle: agents add and edit most servers, and they already know the commands.
 
 Committed to; roughly in order.
 
-_Nothing right now._
+- **Native Windows (no WSL).** [Plan](plans/windows.md). Phase 0 (platform layer) done; phases 1–3 wait on the open decisions in the plan.
 
 ## Improvements
 
@@ -24,13 +24,14 @@ Ideas to look into before deciding.
 - **Managing environments.** Designs to react to: [environments & one-time scripts](https://claude.ai/artifact/1TrXeRERg79LpA4ZUo7xZL) (layered variables on a server; named environments with `.env` files). See and edit a server's variables in one place (only `env` set on purpose is stored today; the rest comes from the login shell), and maybe named sets (dev / staging / prod) or `.env` files to switch between.
 - **One-time scripts.** Designs on the same canvas (scripts with run history; scripts as steps in a profile). Easy to add and run commands that finish (migrations, seeds, codegen, a test run) next to the servers, and easy to see how each run went: exit code, duration, output, past runs.
 - **Tags.** Add or remove the tags a server carries, beyond the built-in ones (branch, accounts, machine), to group and filter servers.
-- **Windows without WSL.** servedev needs `lsof` today (macOS, Linux, WSL).
+- **Signed requests and per-key permissions.** Only if servedev connects without SSH; see the security section of the [Windows plan](plans/windows.md).
 - **Forwarding other ports from a machine on request.** Only dev servers are forwarded now; maybe a per-machine list of extra ports (databases, tools) for what the old `pc-ports` script used to cover.
 - **Run the daemon from source on every machine?** The PC runs `src/cli.ts` with Bun, the Mac a compiled binary; pick one way, or make both update the same way.
 
 ## Done
 
 - 2026-10-09: Per-device access keys: each hub gets its own key from a machine over SSH (`servedev keys issue`), so the machine's token never leaves it; devices are listed and revoked with `servedev keys`, the MCP tools and the Machines sheet ("Devices that can control this computer"). Older machines fall back to their token with a warning. Clearer checklist wording (Connects over SSH, System, Access key, Reaches servedev through SSH).
+- 2026-10-09: Platform layer: everything that depends on the local OS (ports, process table, spawning and stopping process groups, login environment, default home, folder picker, autostart) goes through one `Platform` interface in `src/platform/`, with today's code in `posix.ts` and a `windows.ts` stub; no behavior change.
 - 2026-10-07: A rebuild never removes the dashboard file, so dev mode survives `bun run build`; a daemon with no dashboard build serves a short page instead of failing.
 - 2026-10-07: `servedev remote update` rebuilds a source checkout's own dashboard when `ui/` changed (with `npm ci`, so the checkout stays clean).
 - 2026-10-07: A stop command keeps the run's account variables across a daemon restart (saved only while the run lasts, readable only by you).

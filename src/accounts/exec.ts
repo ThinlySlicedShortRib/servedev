@@ -1,4 +1,5 @@
 /** Running platform CLIs for account providers. */
+import { platform } from "../platform";
 
 export interface RunResult {
   code: number;
@@ -41,9 +42,9 @@ export function errorText(output: string): string {
   return picked.join(" ").replace(/^ERROR:\s*(\([\w.]+\)\s*)?/i, "").replace(/\s+/g, " ");
 }
 
-/** Shell command via sh -c (for JSON providers). */
+/** Shell command via sh -c, or the platform's shell (for JSON providers). */
 export function sh(command: string, opts?: { env?: Record<string, string>; timeoutMs?: number }) {
-  return run(["/bin/sh", "-c", command], opts);
+  return run(platform.shellArgv(command), opts);
 }
 
 export function shellQuote(s: string): string {

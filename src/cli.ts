@@ -6,6 +6,7 @@ import { ApiError, api, daemonStatus, ensureDaemon, stopDaemon } from "./client"
 import { runDaemon } from "./daemon";
 import { AGENT_INSTRUCTIONS } from "./instructions";
 import { runMcp } from "./mcp";
+import { platform } from "./platform";
 import {
   opAutostart,
   opConfig,
@@ -543,7 +544,7 @@ async function main() {
       await ensureDaemon();
       const url = (await daemonStatus())?.dashboard ?? DAEMON_URL;
       console.log(`servedev dashboard: ${url}`);
-      if (!o["no-open"]) Bun.spawn(["open", url], { stdout: "ignore", stderr: "ignore" });
+      if (!o["no-open"]) platform.openUrl(url);
       return;
     }
     case "mcp":

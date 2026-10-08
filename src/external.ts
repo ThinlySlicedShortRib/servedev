@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { platform } from "./platform";
 import type { Listener, Proc } from "./ports";
 import { findRoot } from "./project";
 
@@ -155,32 +156,12 @@ export function suggestName(e: Pick<ExternalServer, "command" | "cwd" | "root" |
   return ["node", "bun", "deno", "python", "python3", "ruby"].includes(program) ? "dev" : clean(program) || "dev";
 }
 
-/** Current working directories of processes, via one lsof call. */
-export async function cwdsOf(pids: number[]): Promise<Map<number, string>> {
-  const out = new Map<number, string>();
-  if (!pids.length) return out;
-  const proc = Bun.spawn(["lsof", "-a", "-d", "cwd", "-p", pids.join(","), "-Fpn"], { stdout: "pipe", stderr: "ignore" });
-  const text = await new Response(proc.stdout).text();
-  await proc.exited;
-  let pid = 0;
-  for (const line of text.split("\n")) {
-    if (line[0] === "p") pid = Number(line.slice(1));
-    else if (line[0] === "n" && pid) out.set(pid, line.slice(1));
-  }
-  return out;
+/** Current working directories of processes. */
+export function cwdsOf(pids: number[]): Promise<Map<number, string>> {
+  return platform.cwdsOf(pids);
 }
 
-/** Start times of processes, via ps. */
-export async function startTimesOf(pids: number[]): Promise<Map<number, number>> {
-  const out = new Map<number, number>();
-  if (!pids.length) return out;
-  const proc = Bun.spawn(["ps", "-o", "pid=,lstart=", "-p", pids.join(",")], { stdout: "pipe", stderr: "ignore", env: { ...process.env, LC_ALL: "C" } });
-  const text = await new Response(proc.stdout).text();
-  await proc.exited;
-  for (const line of text.split("\n")) {
-    const m = /^\s*(\d+)\s+(.+)$/.exec(line);
-    const t = m && Date.parse(m[2]);
-    if (m && t) out.set(Number(m[1]), t);
-  }
-  return out;
+/** Start times of processes. */
+export function startTimesOf(pids: number[]): Promise<Map<number, number>> {
+  return platform.startTimesOf(pids);
 }
