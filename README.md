@@ -187,7 +187,7 @@ MCP tools cover everything the dashboard can do, so you can ask an agent to "mak
 | Profiles | `list_profiles`, `create_profile`, `update_profile`, `delete_profile`, `start_profile` |
 | Custom grid | `get_grid`, `set_grid` (servers + columns, or exact tiles), `update_grid`, `save_grid_as_profile`; an open dashboard updates live |
 | Outside servers | `take_over_server`, `stop_outside_server` |
-| Other machines | `list_machines`, `reconnect_machine`, `update_machine`, `list_folders` (server tools take `machine`) |
+| Other machines | `list_machines`, `reconnect_machine`, `update_machine`, `list_folders` (server tools take `machine`); `list_device_keys`, `revoke_device_key`, `allow_device_key` (devices allowed to control this one) |
 | Settings | `get_settings`, `update_settings` (log retention, proxy port, login autostart) |
 
 ## How it works

@@ -10,6 +10,7 @@ import {
   CircleXIcon,
   CopyIcon,
   EllipsisIcon,
+  KeyRoundIcon,
   ListFilterIcon,
   MonitorIcon,
   PlusIcon,
@@ -46,7 +47,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { Spinner } from "@/components/ui/spinner"
 import { retryMachine, showOnlyMachine, useMachines, useRetrying } from "@/hooks/use-machines"
 import { useNow } from "@/hooks/use-servedev"
-import { ACTIVE, ago, api, type Machine, type MachineUpdate, type Server, type SetupStep } from "@/lib/api"
+import { ACTIVE, ago, api, type DeviceKey, type Machine, type MachineUpdate, type Server, type SetupStep } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { MACHINE_NAME, machineKind, suggestMachineName, worstState } from "@/lib/machines"
 import { cn } from "@/lib/utils"
@@ -148,6 +149,7 @@ export function MachinesSheet({ servers }: { servers: Map<string, Server> }) {
                   />
                 </React.Fragment>
               ))}
+              <DevicesSection open={open} />
               {!machines.hasRemotes && (
                 <Empty className="border border-dashed p-6 md:p-6 terminal:rounded-none">
                   <EmptyHeader>
@@ -191,7 +193,7 @@ export function MachinesSheet({ servers }: { servers: Map<string, Server> }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {removing?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              servedev here disconnects from {removing?.name} and forgets its address, token and last known servers. Nothing changes on{" "}
+              servedev here disconnects from {removing?.name} and forgets its address, access key and last known servers. Nothing changes on{" "}
               {removing?.name}: its servers keep running there. You can add it again any time.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -199,6 +201,121 @@ export function MachinesSheet({ servers }: { servers: Map<string, Server> }) {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={() => removing && remove(removing)}>
               Remove machine
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Devices that can control this computer (their access keys)
+// ---------------------------------------------------------------------------------------------
+
+/** Other machines' servedev that added this one: each has its own access key, which can be revoked here. */
+function DevicesSection({ open }: { open: boolean }) {
+  const now = useNow()
+  const [keys, setKeys] = React.useState<DeviceKey[] | null>(null)
+  const [connected, setConnected] = React.useState<Set<string>>(new Set())
+  const [revoking, setRevoking] = React.useState<DeviceKey | null>(null)
+  const [busy, setBusy] = React.useState<string | null>(null)
+
+  // While the sheet is open: now, then every 15s (devices connect and get used meanwhile).
+  React.useEffect(() => {
+    if (!open) return
+    const load = () =>
+      api<{ keys: DeviceKey[]; connected?: { id: string | null }[] }>("/api/device-keys")
+        .then((r) => {
+          setKeys(r.keys)
+          setConnected(new Set((r.connected ?? []).flatMap((h) => (h.id ? [h.id] : []))))
+        })
+        .catch(() => setKeys((k) => k ?? []))
+    void load()
+    const t = setInterval(() => void load(), 15_000)
+    return () => clearInterval(t)
+  }, [open])
+
+  async function act(k: DeviceKey, action: "revoke" | "allow") {
+    setRevoking(null)
+    setBusy(k.hubId)
+    try {
+      const r = await api<{ keys: DeviceKey[] }>(`/api/device-keys/${action}`, { hub: k.hubId })
+      setKeys(r.keys)
+      if (action === "revoke") toast.success(`Revoked ${k.name}`, { description: "Its access key stopped working, and it can't get a new one until you allow it again." })
+      else toast.success(`${k.name} is allowed again`, { description: "It gets a new access key the next time it connects." })
+    } catch (e) {
+      toast.error(`Couldn't ${action} ${k.name}`, { description: (e as Error).message })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!keys) return null
+  return (
+    <>
+      <Separator />
+      <section className="flex flex-col gap-2" aria-labelledby="devices-heading">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground terminal:rounded-none friendly:rounded-xl">
+            <KeyRoundIcon className="size-4" aria-hidden />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <h3 id="devices-heading" className="text-sm font-medium">
+              Devices that can control this computer
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              {keys.length
+                ? "Each got its own access key when it added this computer over SSH."
+                : "None yet. A device gets its own access key when it adds this computer as a machine."}
+            </p>
+          </div>
+        </div>
+        {keys.length > 0 && (
+          <ul className="ml-11 flex flex-col gap-2">
+            {keys.map((k) => (
+              <li key={k.hubId} className={cn("flex items-center gap-3 p-2.5 text-xs", box)}>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="flex flex-wrap items-center gap-x-2 text-sm">
+                    <span className={cn("font-medium", k.revoked && "text-muted-foreground line-through")}>{k.name}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{k.hubId.slice(0, 8)}</span>
+                    {!k.revoked && connected.has(k.hubId) && <span className={cn("text-xs", okText)}>connected</span>}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {k.revoked
+                      ? `Revoked ${ago(k.revoked, now)} ago`
+                      : `Added ${ago(k.created, now)} ago · ${k.lastUsed ? `last used ${ago(k.lastUsed, now)} ago` : "never used"}`}
+                  </span>
+                </div>
+                {k.revoked ? (
+                  <Button size="xs" variant="outline" disabled={busy === k.hubId} onClick={() => void act(k, "allow")}>
+                    {busy === k.hubId && <Spinner data-icon="inline-start" />}
+                    Allow again
+                  </Button>
+                ) : (
+                  <Button size="xs" variant="outline" disabled={busy === k.hubId} onClick={() => setRevoking(k)}>
+                    {busy === k.hubId && <Spinner data-icon="inline-start" />}
+                    Revoke
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <AlertDialog open={revoking !== null} onOpenChange={(o) => !o && setRevoking(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke {revoking?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its access key stops working right away, so it can no longer see or control the servers on this computer, and it can't get a new key
+              until you allow it again here. It can still sign in over SSH: to shut it out completely, also remove its key from ~/.ssh/authorized_keys.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => revoking && void act(revoking, "revoke")}>
+              Revoke access
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -418,11 +535,11 @@ function MachineCard({
 
 /** The checklist's steps, in order (the daemon's src/remote/setup.ts). */
 const STEPS: { id: SetupStep["id"]; label: string }[] = [
-  { id: "ssh", label: "SSH connection" },
-  { id: "os", label: "Operating system" },
-  { id: "servedev", label: "servedev installed and running" },
-  { id: "token", label: "API token" },
-  { id: "api", label: "servedev API through the tunnel" },
+  { id: "ssh", label: "Connects over SSH" },
+  { id: "os", label: "System" },
+  { id: "servedev", label: "servedev is installed and running" },
+  { id: "token", label: "Access key" },
+  { id: "api", label: "Reaches servedev through SSH" },
 ]
 
 type Result = { ok: boolean; steps: SetupStep[]; machine?: Machine }

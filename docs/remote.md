@@ -23,11 +23,11 @@ servedev remote rm pc                        # forget it here (nothing changes o
 
 The hub keeps **one SSH connection** per machine (an OpenSSH ControlMaster using your keys, so it must work without a password: `ssh -o BatchMode=yes <host> echo ok`). Over it:
 
-- **Setup** runs a few commands on the machine once per connection: find `servedev`, start its daemon if it isn't running, read its API token. Reconnecting with a token that still works runs nothing there at all.
-- **The API** of the remote servedev is forwarded to a local port. Everything else (listing, starting, stopping, logs, the live event stream) is plain HTTP to the remote's own API, with its token and its own `Host` header (its Host check stays as strict as ever).
+- **Setup** runs a few commands on the machine once per connection: find `servedev`, start its daemon if it isn't running, and have it issue an **access key** for this hub (`servedev keys issue`). Reconnecting with a key that still works runs nothing there at all; a key the machine rejects (revoked, replaced, or its keys file wiped) gets a new one issued over SSH automatically.
+- **The API** of the remote servedev is forwarded to a local port. Everything else (listing, starting, stopping, logs, the live event stream) is plain HTTP to the remote's own API, with the access key and its own `Host` header (its Host check stays as strict as ever).
 - **Server ports**: when a remote server listens, its ports are forwarded here, to the same number when that's free, else to another one, and it gets a hostname on the hub's proxy: `<server>.<machine>.localhost` (`<server>.<project>.<machine>.localhost` when two projects there use the same name). Forwards go away when the server stops. Dev servers started there outside servedev (from a terminal or an agent; the ones its `list_servers` shows as running outside servedev) are forwarded the same way: the hub asks every 5s. When a server answers only on the other loopback address (expo on WSL listens on `::1`), its forward still gets the same number.
 
-The "Add machine" checklist (`remote add`, `remote reconnect`, the dashboard) is the same sequence: **SSH connection → operating system → servedev installed and running → API token → servedev API through the tunnel**. A failed step stops the rest and says how to fix it.
+The "Add machine" checklist (`remote add`, `remote reconnect`, the dashboard) is the same sequence: **Connects over SSH → System → servedev is installed and running → Access key → Reaches servedev through SSH**. A failed step stops the rest and says how to fix it.
 
 Connection states: **connecting** (first try), **connected**, **reconnecting** (lost it; retries after 1s, 2s, 4s … with the attempt count), **offline** (still failing after 5 tries; retried every minute). The hub notices a lost machine through SSH keepalives (within ~45s), the remote's event stream ending, or a health check every 15s.
 
@@ -43,9 +43,20 @@ Mixed versions work both ways: an older hub sends only its hostname and is count
 |---|---|
 | The machine: `ssh`, and the detected `kind` / `distro` | `~/.servedev/config.json` → `machines` (edit by hand if you like) |
 | This hub's id (what it's told apart by on machines) | `~/.servedev/hub-id` (mode 600) |
-| Its API token | macOS Keychain (`dev.servedev.machine`), elsewhere `~/.servedev/machines/<name>.token` (mode 600). Never config.json. |
+| The access key the machine issued to this hub | macOS Keychain (`dev.servedev.machine`), elsewhere `~/.servedev/machines/<name>.token` (mode 600). Never config.json. |
+| On the machine: the devices with access keys | `~/.servedev/device-keys.json` (mode 600): hub id, name, added, last used, revoked; only each key's SHA-256 hash |
 | Last known servers, version, last seen | `~/.servedev/machines/<name>.json` |
 | SSH control socket | `~/.servedev/machines/<name>.sock` |
+
+### Access keys and security
+
+Each hub gets its **own access key** from each machine it adds; the machine's own token (`~/.servedev/token`, used by its dashboard, CLI and MCP) never leaves it.
+
+- **Issuing.** During setup the hub runs `servedev keys issue --hub-id <its id> --name <its hostname>` on the machine over SSH (through `wsl.exe` on a Windows PC). That makes a random `sdk_…` key, stores only its SHA-256 hash in `device-keys.json` (written atomically, mode 600) and prints it on a tagged `@key` line for the hub, which keeps it in the Keychain (or the 600 file above). Issuing again for the same hub id replaces its old key. It works whether or not the daemon is running there, and a running daemon picks up the new key at once.
+- **Using.** The machine's daemon accepts its own token or a valid access key, compared by hash in constant time. A key only works together with the hub id it was issued to (`x-servedev-hub-id`), so a key copied to another device is rejected. Last used is recorded (at most once a minute).
+- **Seeing and revoking.** On the machine: `servedev keys` lists the devices (name, short hub id, added, last used, connected or revoked); `servedev keys revoke <name or hub id>` revokes one; the dashboard's Machines sheet has **Devices that can control this computer** with a Revoke button; agents have `list_device_keys` / `revoke_device_key`. Revoking takes effect at once: new requests with that key get 401 and its open event streams are closed (also when revoked with the CLI while the daemon runs; it checks the file every few seconds). Managing keys (`/api/device-keys…`) takes the machine's own token; an access key gets 403 there.
+- **Revoked stays revoked.** A revoked device can't simply get a new key on its next reconnect: issuing is refused (its checklist says "pc revoked mac's access") until you allow it again on the machine (`servedev keys allow <name or hub id>`, **Allow again** in the dashboard, or `allow_device_key`). It can still sign in over SSH, so to shut a device out completely also remove its key from `~/.ssh/authorized_keys` there.
+- **Older servedev on the machine.** One without `servedev keys` (it answers "Unknown option '--hub-id'") is handled as before: the hub reads that machine's own token, and the Access key step is a warning suggesting `servedev remote update <machine>`. After updating, the next reconnect swaps the token for a key. An older hub connecting to a newer machine still reads its token the old way.
 
 ## Updating servedev on a machine
 
@@ -106,7 +117,7 @@ Nothing is synced between machines; each profile belongs somewhere, and that dec
 
 ## Agents
 
-The MCP server's server tools take an optional `machine` (or a `pc/…` id as the name): `start_server`, `stop_server` (with `all`: everything running on that machine), `restart_server`, `remove_server`, `server_status`, `server_logs`, `search_logs`, `server_runs`, `list_servers` (each remote server has `machine`), `inspect_folder`, and `list_folders`. `start_server` with `machine` and `dir` creates a server in a folder there. Profile and grid tools (`create_profile`, `update_profile`, `start_profile`, `start_servers` with a profile, `set_grid`, `update_grid`) take `pc/…` ids too. `list_machines` shows each machine's state, system, version, server counts and forwarded ports; `reconnect_machine` retries one now and reports the checklist; `update_machine` updates servedev there, like `remote update`. `servedev instructions` (for CLAUDE.md / AGENTS.md) mentions all of this.
+The MCP server's server tools take an optional `machine` (or a `pc/…` id as the name): `start_server`, `stop_server` (with `all`: everything running on that machine), `restart_server`, `remove_server`, `server_status`, `server_logs`, `search_logs`, `server_runs`, `list_servers` (each remote server has `machine`), `inspect_folder`, and `list_folders`. `start_server` with `machine` and `dir` creates a server in a folder there. Profile and grid tools (`create_profile`, `update_profile`, `start_profile`, `start_servers` with a profile, `set_grid`, `update_grid`) take `pc/…` ids too. `list_machines` shows each machine's state, system, version, server counts and forwarded ports; `reconnect_machine` retries one now and reports the checklist; `update_machine` updates servedev there, like `remote update`. `list_device_keys`, `revoke_device_key` and `allow_device_key` manage the other devices allowed to control this machine (like `servedev keys`). `servedev instructions` (for CLAUDE.md / AGENTS.md) mentions all of this.
 
 ## Windows PCs (servers in WSL)
 
@@ -139,7 +150,7 @@ The profile dialog lists servers by machine, then project; the switcher shows wh
 
 ## API (for the dashboard and other clients)
 
-All under the hub's token, like the rest of the API.
+All under the hub's token, like the rest of the API (a machine also accepts an access key issued to the hub that sends it; see above).
 
 | Endpoint | What |
 |---|---|
@@ -151,6 +162,9 @@ All under the hub's token, like the rest of the API.
 | `POST /api/machines/boot` `{ name, install? }` | `{ supported, script, powershell, installed?, note? }` |
 | `POST /api/machines/update` `{ name }` | `{ ok, kind, repo, branch, before, after, commits, done, error?, hint?, restarted, hubVersion, steps, machine }`; 409 when refused (nothing changed there) |
 | `GET /api/hubs` | On a machine: the hubs with an event stream open here, `{ hubs: [{ name, hostname, id, since }] }` (also in the event stream's snapshot as `hubs`, and a `hubs` event when it changes). `name` is what to show (`mac (3f9a1c)` when another hub has the same hostname); `id` is null for an older hub that doesn't send one. A MachineSummary's `otherHubs` lists the other ones' names. |
+| `GET /api/device-keys` | On a machine: `{ keys: [{ hubId, name, created, lastUsed?, revoked? }], connected: hubs }`. Its own token only. |
+| `POST /api/device-keys/revoke` `{ hub }` | Revoke by name, hub id or its start: `{ revoked, keys }` (404 no match, 409 several) |
+| `POST /api/device-keys/allow` `{ hub }` | Let a revoked device get a key again: `{ allowed, keys }` |
 | `GET /api/stream/events` | The snapshot has `machines`; remote servers arrive as `server` / `remove` events with `pc/` ids; `machine` (a MachineSummary) when a machine's state or forwards change; `machine-removed` `{ name }`; `profiles` again when a machine's servers, shared profiles or state change what profiles show |
 | `GET /api/profiles` | Yours (members on another machine as `pc/` ids, with `unavailable`: the ones whose machine isn't connected) and this machine's shared ones, then each machine's shared ones (`machine`, `pc/` ids) |
 | `POST /api/profiles/start`, `POST /api/servers/start` `{ ids, profile }` | In order across machines; results may have `machine`, `skipped` (machine not connected) and `note` (e.g. which accounts a remote server used) |

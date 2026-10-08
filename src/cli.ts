@@ -46,7 +46,8 @@ import {
   type OpResult,
 } from "./ops";
 import { clean } from "./logs";
-import { opRemoteAdd, opRemoteBoot, opRemoteList, opRemoteReconnect, opRemoteRemove, opRemoteUpdate } from "./remote/ops";
+import { opKeysAllow, opKeysList, opKeysRevoke, opRemoteAdd, opRemoteBoot, opRemoteList, opRemoteReconnect, opRemoteRemove, opRemoteUpdate } from "./remote/ops";
+import { DeviceKeys } from "./remote/device-keys";
 import { DAEMON_LOG, DAEMON_URL, VERSION, getToken } from "./paths";
 import { findRoot, type ReadySpec } from "./project";
 
@@ -110,12 +111,17 @@ Usage:
   servedev daemon [status|stop|restart]
 
 Other machines (this one is the hub; each machine runs its own servedev, reached over SSH):
-  servedev remote add <name> <user@host>    connect one and check it step by step (SSH, OS, servedev, token, API)
+  servedev remote add <name> <user@host>    connect one and check it step by step (SSH, system, servedev, access key, a test request)
   servedev remote ls                        machines: connected / reconnecting / offline, versions, servers
   servedev remote rm <name>                 disconnect and forget it (nothing changes on that machine)
-  servedev remote reconnect <name>          reconnect now, re-reading its token
+  servedev remote reconnect <name>          reconnect now (gets a new access key over SSH if the saved one stopped working)
   servedev remote update <name>             update servedev there (git pull, install or build) and restart its daemon
   servedev remote boot <name> [--install]   Windows/WSL: start servedev at logon and keep WSL running
+  servedev keys [ls]                        devices (hubs) that can control this computer, each with its own access key
+  servedev keys revoke <device|hub id>      stop one: its key stops working and it can't get a new one
+  servedev keys allow <device|hub id>       let a revoked device get a key again (on its next connect)
+  servedev keys issue --hub-id <id> --name <device>
+                                            (run by the other machine over SSH) issue a key; prints "@key sdk_..."
   Their servers' ids start with the machine: pc/demo:api. Use them anywhere a server name goes, or add
   --on <machine> to start, stop, restart, logs, status, search and ls (e.g. servedev logs api --on pc).
   servedev start <name> --on pc --dir '~/code/app' [-- <command>]
@@ -256,6 +262,8 @@ async function main() {
       on: { type: "string" },
       dir: { type: "string", short: "d" },
       hidden: { type: "boolean" },
+      "hub-id": { type: "string" },
+      name: { type: "string" },
     },
   });
 
@@ -500,6 +508,35 @@ async function main() {
         if (!name) throw new Error("usage: servedev remote boot <name> [--install]");
         result = await opRemoteBoot({ name, install: o.install });
       } else throw new Error("usage: servedev remote add|ls|rm|reconnect|update|boot ...");
+      break;
+    }
+    case "keys":
+    case "key": {
+      const [sub, ref] = args;
+      if (sub === "issue") {
+        // Run over SSH by a hub adding this machine; works whether or not the daemon is running.
+        if (!o["hub-id"]) throw new Error("usage: servedev keys issue --hub-id <id> --name <device>");
+        try {
+          const r = new DeviceKeys().issue(o["hub-id"], o.name ?? "");
+          console.log(`@key ${r.key}`);
+        } catch (e) {
+          if ((e as { status?: number }).status === 403) {
+            console.log(`@revoked ${(e as Error).message}`);
+            process.exitCode = 3;
+            return;
+          }
+          throw e;
+        }
+        return;
+      }
+      if (!sub || sub === "ls" || sub === "list") result = await opKeysList();
+      else if (sub === "revoke" || sub === "rm") {
+        if (!ref) throw new Error("usage: servedev keys revoke <device name or hub id>");
+        result = await opKeysRevoke(ref);
+      } else if (sub === "allow") {
+        if (!ref) throw new Error("usage: servedev keys allow <device name or hub id>");
+        result = await opKeysAllow(ref);
+      } else throw new Error("usage: servedev keys ls|revoke|allow|issue ...");
       break;
     }
     case "ui":

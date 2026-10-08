@@ -15,8 +15,9 @@ Other files in `~/.servedev`:
 | `credentials/gcloud/*.json` | Saved Google app credentials, readable only by you. Never shared. |
 | `servedev.db` | State: runs, pids, ports, log markers, what each run started with. Mode 600: while a server with a stop command runs, its profile's account variables are kept here so the stop command gets them after a daemon restart (deleted when the run ends). Deleting it loses history only. |
 | `logs/` | One log file per run |
-| `machines/` | Other machines: last known servers, SSH control sockets, and (off macOS) their API tokens, readable only by you. See [remote.md](remote.md). |
+| `machines/` | Other machines: last known servers, SSH control sockets, and (off macOS) the access keys they issued to this machine, readable only by you. See [remote.md](remote.md). |
 | `hub-id` | A random id this servedev sends to other machines, so two hubs with the same hostname are told apart |
+| `device-keys.json` | Other machines (hubs) allowed to control this one: each one's name, hub id, dates and the SHA-256 hash of its access key (mode 600). Manage with `servedev keys`. See [remote.md](remote.md#access-keys-and-security). |
 
 Both config files accept comments (JSONC) and have JSON Schemas for editor autocomplete: [`schema/servedev.schema.json`](../schema/servedev.schema.json) and [`schema/config.schema.json`](../schema/config.schema.json). The daemon also serves them at `http://127.0.0.1:7777/schema/<name>.json`.
 
@@ -103,7 +104,7 @@ Every server and profile remembers where it came from. The dashboard tags shared
 - **Server ids** are `<project>:<name>`. The project name comes from `projects`, so local profiles keep working when a repo moves.
 - **Overrides** are keyed by the repo's git remote (or `folder:<name>` without one) plus the profile name, so your accounts, skipped servers and grid apply in every worktree of the repo.
 - **Your profiles and grids** can list another machine's servers by id (`pc/shop:db`); they start on that machine, in the profile's order. A ref to a machine or server that's gone stays in the file. A profile's `accounts` apply to its servers on this machine; another machine's servers use the accounts resolved there. See [remote.md](remote.md#profiles-grids-and-pins-across-machines).
-- **Machines** are other computers running servedev whose servers this one shows and controls over SSH; their ids get the machine's name in front (`pc/my-app:api`). Only `ssh` is needed (`user@host`, `ssh://user@host:port`, or a Host from `~/.ssh/config`); `kind` (`posix` or `wsl`) and `distro` are detected when it connects and kept so you can see and change them. The machine's API token is never stored here (Keychain on macOS, else `~/.servedev/machines/<name>.token`). Adding, removing or changing an entry by hand connects, disconnects or reconnects it. See [remote.md](remote.md).
+- **Machines** are other computers running servedev whose servers this one shows and controls over SSH; their ids get the machine's name in front (`pc/my-app:api`). Only `ssh` is needed (`user@host`, `ssh://user@host:port`, or a Host from `~/.ssh/config`); `kind` (`posix` or `wsl`) and `distro` are detected when it connects and kept so you can see and change them. The access key the machine issues to this one is never stored here (Keychain on macOS, else `~/.servedev/machines/<name>.token`). Adding, removing or changing an entry by hand connects, disconnects or reconnects it. See [remote.md](remote.md).
 
 ## Worktrees
 
