@@ -8,7 +8,7 @@ Principle: agents add and edit most servers, and they already know the commands.
 
 Committed to; roughly in order.
 
-_Nothing right now._
+- **Native Windows (no WSL).** [Plan](plans/windows.md). Phase 0 (platform layer) in progress; phases 1–3 wait on the open decisions in the plan.
 
 ## Improvements
 
@@ -24,7 +24,7 @@ Ideas to look into before deciding.
 - **Managing environments.** Designs to react to: [environments & one-time scripts](https://claude.ai/artifact/1TrXeRERg79LpA4ZUo7xZL) (layered variables on a server; named environments with `.env` files). See and edit a server's variables in one place (only `env` set on purpose is stored today; the rest comes from the login shell), and maybe named sets (dev / staging / prod) or `.env` files to switch between.
 - **One-time scripts.** Designs on the same canvas (scripts with run history; scripts as steps in a profile). Easy to add and run commands that finish (migrations, seeds, codegen, a test run) next to the servers, and easy to see how each run went: exit code, duration, output, past runs.
 - **Tags.** Add or remove the tags a server carries, beyond the built-in ones (branch, accounts, machine), to group and filter servers.
-- **Windows without WSL.** servedev needs `lsof` today (macOS, Linux, WSL).
+- **Signed requests and per-key permissions.** Only if servedev connects without SSH; see the security section of the [Windows plan](plans/windows.md).
 - **Forwarding other ports from a machine on request.** Only dev servers are forwarded now; maybe a per-machine list of extra ports (databases, tools) for what the old `pc-ports` script used to cover.
 - **Run the daemon from source on every machine?** The PC runs `src/cli.ts` with Bun, the Mac a compiled binary; pick one way, or make both update the same way.
 
