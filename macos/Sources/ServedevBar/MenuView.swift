@@ -1,16 +1,46 @@
 import ServiceManagement
 import SwiftUI
 
-/** The menu bar window: running servers first, then profiles, pins and the long tail of stopped ones. */
+/** Which machine's servers the menu shows. */
+enum MachineFilter: Hashable {
+  case local
+  case remote(String)
+  case all
+
+  func includes(_ server: Server) -> Bool {
+    switch self {
+    case .local: server.machine == nil
+    case .remote(let name): server.machine == name
+    case .all: true
+    }
+  }
+}
+
+/** Servers of one project on one machine, shown as a card. */
+struct ProjectGroup: Identifiable {
+  let id: String
+  let title: String
+  let servers: [Server]
+}
+
+/**
+ * The menu bar window, laid out like Control Center: profile tiles, then a card per project with
+ * switches. Projects with something running (or freshly crashed) come first; the long tail of
+ * stopped projects folds away.
+ */
 struct MenuView: View {
   @EnvironmentObject var store: Store
   @State private var query = ""
+  @State private var machine: MachineFilter = .local
+  @State private var expanded: String?
   @State private var showStopped = false
+  @State private var confirmStopAll = false
+
+  private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    VStack(alignment: .leading, spacing: 10) {
       header
-      Divider()
       if case .offline(let message) = store.connection {
         offline(message)
       } else if store.connection == .connecting && store.servers.isEmpty {
@@ -22,47 +52,66 @@ struct MenuView: View {
         }
         .padding(20)
       } else {
-        TextField("Search", text: $query)
+        if !store.machines.isEmpty { machinePicker }
+        TextField("Search servers", text: $query)
           .textFieldStyle(.roundedBorder)
-          .padding(.horizontal, 10)
-          .padding(.vertical, 8)
-        // A bare ScrollView always takes its full height; this only scrolls when the list overflows.
+        if !profiles.isEmpty { profileTiles }
+        // A bare ScrollView always takes its full height; this only scrolls when the cards overflow.
         ViewThatFits(in: .vertical) {
-          paddedContent
-          ScrollView { paddedContent }
+          cards
+          ScrollView { cards }
         }
-        .frame(maxHeight: 420)
+        .frame(maxHeight: 480)
       }
-      Divider()
       footer
     }
-    .frame(width: 340)
+    .padding(12)
+    .frame(width: 360)
     // Opening the menu counts as seeing the crashes. onAppear can miss later openings of a .window
     // MenuBarExtra, so the window becoming key (this app's only window) is watched as well.
     .onAppear { store.markCrashesSeen() }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
       store.markCrashesSeen()
     }
+    // Closing the menu collapses the open row, which stops its log polling.
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+      expanded = nil
+      confirmStopAll = false
+    }
+    .onChange(of: store.machines) { _, names in
+      if case .remote(let name) = machine, !names.contains(name) { machine = .local }
+    }
   }
 
-  // MARK: Sections
+  // MARK: Header and filters
 
   private var header: some View {
     HStack(spacing: 8) {
-      Text("servedev").font(.headline)
+      Text("servedev").font(.system(size: 14, weight: .bold))
       if store.connection == .connected {
-        Text("\(store.runningCount) running").foregroundStyle(.secondary)
+        Text("\(store.runningCount) of \(store.servers.count) running").foregroundStyle(.secondary)
       }
       Spacer()
-      Button {
-        store.openDashboard()
-      } label: {
-        Label("Open Dashboard", systemImage: "macwindow")
-      }
-      .controlSize(.small)
+      Button("Dashboard") { store.openDashboard() }
+        .buttonStyle(.link)
+        .font(.system(size: 12))
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
+  }
+
+  private var machinePicker: some View {
+    Picker("Machine", selection: $machine) {
+      Text("This Mac · \(activeCount(.local))").tag(MachineFilter.local)
+      ForEach(store.machines, id: \.self) { name in
+        Text("\(name) · \(activeCount(.remote(name)))").tag(MachineFilter.remote(name))
+      }
+      Text("All").tag(MachineFilter.all)
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+  }
+
+  private func activeCount(_ filter: MachineFilter) -> Int {
+    store.servers.values.filter { filter.includes($0) && $0.isActive }.count
   }
 
   private func offline(_ message: String) -> some View {
@@ -84,16 +133,9 @@ struct MenuView: View {
     .padding(20)
   }
 
-  private var filtered: [Server] {
-    let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-    guard !q.isEmpty else { return store.list }
-    return store.list.filter { s in
-      [s.name, s.project, s.id, s.branch ?? "", s.machine ?? "", s.port.map(String.init) ?? ""]
-        .contains { $0.lowercased().contains(q) }
-    }
-  }
+  // MARK: Profiles
 
-  private var filteredProfiles: [Profile] {
+  private var profiles: [Profile] {
     let q = query.trimmingCharacters(in: .whitespaces).lowercased()
     guard !q.isEmpty else { return store.profiles }
     return store.profiles.filter { p in
@@ -101,51 +143,54 @@ struct MenuView: View {
     }
   }
 
-  private var paddedContent: some View {
-    content
-      .padding(.horizontal, 6)
-      .padding(.bottom, 6)
+  private var profileTiles: some View {
+    LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 8), count: 3), spacing: 8) {
+      ForEach(profiles) { ProfileTile(profile: $0) }
+    }
   }
 
-  @ViewBuilder
-  private var content: some View {
-    let servers = filtered
-    // Old crashes sit with the stopped servers (red dot, "crashed" subtitle) instead of in Running.
-    let isRunning = { (s: Server) in s.isActive || store.recentCrashes.contains(s.id) }
-    let running = servers.filter(isRunning)
-    let pinned = servers.filter { $0.pinned == true && !isRunning($0) }
-    let stopped = servers.filter { $0.pinned != true && !isRunning($0) }
-    let profiles = filteredProfiles
-    let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+  // MARK: Cards
 
-    VStack(alignment: .leading, spacing: 2) {
-      if !running.isEmpty {
-        SectionTitle("Running")
-        ForEach(running) { ServerRow(server: $0) }
+  private var filtered: [Server] {
+    let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+    return store.list.filter { s in
+      guard machine.includes(s) else { return false }
+      guard !q.isEmpty else { return true }
+      return [s.name, s.project, s.id, s.branch ?? "", s.machine ?? "", s.port.map(String.init) ?? ""]
+        .contains { $0.lowercased().contains(q) }
+    }
+  }
+
+  private func isLive(_ s: Server) -> Bool { s.isActive || store.recentCrashes.contains(s.id) }
+
+  @ViewBuilder
+  private var cards: some View {
+    let groups = Dictionary(grouping: filtered) { "\($0.machine ?? "")\u{0}\($0.project)" }
+      .map { key, servers in
+        ProjectGroup(id: key, title: [servers[0].machine, servers[0].project].compactMap { $0 }.joined(separator: " · "), servers: servers)
       }
-      if !profiles.isEmpty {
-        SectionTitle("Profiles")
-        ForEach(profiles) { ProfileRow(profile: $0) }
-      }
-      if !pinned.isEmpty {
-        SectionTitle("Pinned")
-        ForEach(pinned) { ServerRow(server: $0) }
-      }
+      .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    let live = groups.filter { $0.servers.contains(where: isLive) }
+    let pinned = groups.filter { g in !g.servers.contains(where: isLive) && g.servers.contains { $0.pinned == true } }
+    let stopped = groups.filter { g in !g.servers.contains(where: isLive) && !g.servers.contains { $0.pinned == true } }
+
+    VStack(alignment: .leading, spacing: 8) {
+      ForEach(live + pinned) { ProjectCard(group: $0, expanded: $expanded) }
       if !stopped.isEmpty {
         // A search should show its matches, not hide them behind a collapsed group.
         DisclosureGroup(isExpanded: Binding(get: { searching || showStopped }, set: { showStopped = $0 })) {
-          LazyVStack(alignment: .leading, spacing: 2) {
-            ForEach(stopped) { ServerRow(server: $0) }
+          LazyVStack(alignment: .leading, spacing: 8) {
+            ForEach(stopped) { ProjectCard(group: $0, expanded: $expanded) }
           }
+          .padding(.top, 6)
         } label: {
-          Text("Stopped (\(stopped.count))")
-            .font(.subheadline.weight(.semibold))
+          Text("Stopped · \(stopped.count) \(stopped.count == 1 ? "project" : "projects")")
+            .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 6)
-        .padding(.top, 8)
+        .padding(.leading, 4)
       }
-      if running.isEmpty && profiles.isEmpty && pinned.isEmpty && stopped.isEmpty {
+      if groups.isEmpty {
         Text(searching ? "Nothing matches “\(query)”." : "No servers yet.")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity)
@@ -154,8 +199,22 @@ struct MenuView: View {
     }
   }
 
+  // MARK: Footer
+
+  private var stopAllIds: [String] {
+    store.servers.values.filter { machine.includes($0) && $0.isActive }.map(\.id)
+  }
+
+  private var stopAllLabel: String {
+    switch machine {
+    case .local: "Stop all on This Mac"
+    case .remote(let name): "Stop all on \(name)"
+    case .all: "Stop all"
+    }
+  }
+
   private var footer: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: 8) {
       if let error = store.lastError {
         HStack(alignment: .top, spacing: 4) {
           Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
@@ -174,168 +233,37 @@ struct MenuView: View {
           .controlSize(.small)
         }
       }
-      HStack {
+      HStack(spacing: 8) {
+        if store.connection == .connected {
+          let ids = stopAllIds
+          // Stopping everything is one click away from the menu, so it asks once more first.
+          Button(confirmStopAll ? "Stop \(ids.count) servers?" : stopAllLabel) {
+            if confirmStopAll {
+              confirmStopAll = false
+              store.stopMany(ids, key: "stop-all")
+            } else {
+              confirmStopAll = true
+              Task {
+                try? await Task.sleep(for: .seconds(3))
+                confirmStopAll = false
+              }
+            }
+          }
+          .tint(confirmStopAll ? .red : nil)
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+          .disabled(ids.isEmpty || store.busy.contains("stop-all"))
+        }
+        Spacer()
         if Bundle.main.bundleIdentifier != nil {
           LaunchAtLoginToggle()
         }
-        Spacer()
         Button("Quit") { NSApp.terminate(nil) }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
           .keyboardShortcut("q")
       }
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
-  }
-}
-
-private struct SectionTitle: View {
-  let title: String
-  init(_ title: String) { self.title = title }
-
-  var body: some View {
-    Text(title)
-      .font(.subheadline.weight(.semibold))
-      .foregroundStyle(.secondary)
-      .padding(.horizontal, 6)
-      .padding(.top, 8)
-      .padding(.bottom, 2)
-  }
-}
-
-// MARK: Rows
-
-private struct ServerRow: View {
-  @EnvironmentObject var store: Store
-  let server: Server
-  @State private var hovering = false
-
-  var body: some View {
-    HStack(spacing: 8) {
-      StatusDot(status: server.status)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(server.name)
-          .foregroundStyle(store.recentCrashes.contains(server.id) ? .red : .primary)
-          .lineLimit(1)
-        Text(subtitle)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-      }
-      Spacer(minLength: 4)
-      if store.busy.contains(server.id) {
-        ProgressView().controlSize(.small)
-      } else {
-        buttons
-      }
-    }
-    .padding(.horizontal, 6)
-    .padding(.vertical, 4)
-    .background(RoundedRectangle(cornerRadius: 6).fill(hovering ? Color.primary.opacity(0.07) : .clear))
-    .onHover { hovering = $0 }
-    .help(server.error ?? server.id)
-  }
-
-  /** "pc · project · :3000 · branch": where it runs, what it is and how to reach it. */
-  private var subtitle: String {
-    var parts: [String] = []
-    if let machine = server.machine { parts.append(machine) }
-    parts.append(server.project)
-    if let port = server.port ?? server.url.flatMap({ URL(string: $0)?.port }) { parts.append(":\(port)") }
-    if let branch = server.branch, !branch.isEmpty { parts.append(branch) }
-    if server.status == .crashed { parts.append("crashed") }
-    return parts.joined(separator: " · ")
-  }
-
-  @ViewBuilder
-  private var buttons: some View {
-    HStack(spacing: 2) {
-      if server.status == .running, server.openURL != nil {
-        IconButton("arrow.up.forward.square", help: "Open") { store.open(server) }
-      }
-      if server.isActive || server.status == .crashed {
-        IconButton("arrow.clockwise", help: "Restart") { store.restart(server) }
-      }
-      if server.isActive {
-        IconButton("stop.fill", help: "Stop") { store.stop(server) }
-      } else {
-        IconButton("play.fill", help: "Start") { store.start(server) }
-      }
-    }
-    .disabled(server.stale == true)
-  }
-}
-
-private struct ProfileRow: View {
-  @EnvironmentObject var store: Store
-  let profile: Profile
-
-  var body: some View {
-    let running = store.isRunning(profile)
-    let active = profile.servers.filter { store.servers[$0]?.isActive == true }.count
-    HStack(spacing: 8) {
-      Image(systemName: "square.stack.3d.up")
-        .foregroundStyle(running ? .green : .secondary)
-        .frame(width: 10)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(profile.name).lineLimit(1)
-        Text(running ? "\(active) of \(profile.servers.count) running" : "\(profile.servers.count) servers")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      Spacer(minLength: 4)
-      if store.busy.contains("profile:\(profile.id)") {
-        ProgressView().controlSize(.small)
-      } else if running {
-        IconButton("stop.fill", help: "Stop profile") { store.stopProfile(profile) }
-      } else {
-        IconButton("play.fill", help: "Start profile") { store.startProfile(profile) }
-      }
-    }
-    .padding(.horizontal, 6)
-    .padding(.vertical, 4)
-  }
-}
-
-private struct StatusDot: View {
-  let status: Status
-
-  var body: some View {
-    Circle()
-      .fill(color)
-      .frame(width: 8, height: 8)
-      .frame(width: 10)
-  }
-
-  private var color: Color {
-    switch status {
-    case .running: .green
-    case .starting, .stopping: .orange
-    case .crashed: .red
-    default: .secondary.opacity(0.5)
-    }
-  }
-}
-
-private struct IconButton: View {
-  let symbol: String
-  let help: String
-  let action: () -> Void
-
-  init(_ symbol: String, help: String, action: @escaping () -> Void) {
-    self.symbol = symbol
-    self.help = help
-    self.action = action
-  }
-
-  var body: some View {
-    Button(action: action) {
-      Image(systemName: symbol)
-        .frame(width: 18, height: 18)
-        .contentShape(Rectangle())
-    }
-    .buttonStyle(.borderless)
-    .help(help)
   }
 }
 

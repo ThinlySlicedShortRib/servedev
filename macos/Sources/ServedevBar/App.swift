@@ -6,6 +6,8 @@ struct ServedevBarApp: App {
   @StateObject private var store = Store()
 
   init() {
+    // A menu bar app has no windows most of the time, which AppKit can take as a sign it may quit.
+    ProcessInfo.processInfo.disableAutomaticTermination("Lives in the menu bar")
     Notifier.shared.requestAuthorization()
   }
 

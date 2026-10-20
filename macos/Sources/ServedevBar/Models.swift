@@ -19,6 +19,8 @@ struct Server: Decodable, Identifiable, Equatable {
   let pinned: Bool?
   let error: String?
   let exitCode: Int?
+  /** Milliseconds since 1970, when its last run ended. */
+  let stoppedAt: Double?
 
   var openURL: URL? { (customUrl ?? url).flatMap(URL.init(string:)) }
   var isActive: Bool { status == .starting || status == .running || status == .stopping }
@@ -55,6 +57,11 @@ struct Snapshot: Decodable {
 }
 
 struct Removed: Decodable { let id: String }
+
+/** /api/logs: the newest lines of a server's latest run. */
+struct LogTail: Decodable {
+  let lines: [String]
+}
 
 struct Health: Decodable {
   let version: String

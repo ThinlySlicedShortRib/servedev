@@ -57,6 +57,19 @@ final class DaemonClient: @unchecked Sendable {
     return try JSONDecoder().decode(Health.self, from: data)
   }
 
+  func get(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
+    var req = try request(path)
+    var parts = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)!
+    parts.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+    req.url = parts.url
+    let (data, res) = try await session.data(for: req)
+    if let http = res as? HTTPURLResponse, http.statusCode >= 400 {
+      let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+      throw DaemonError(message: message ?? "servedev answered \(http.statusCode)")
+    }
+    return data
+  }
+
   @discardableResult
   func post(_ path: String, _ body: [String: Any]) async throws -> Data {
     let (data, res) = try await session.data(for: try request(path, method: "POST", body: body))

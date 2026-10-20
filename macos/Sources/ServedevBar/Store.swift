@@ -143,6 +143,69 @@ final class Store: ObservableObject {
 
   func openDashboard() { NSWorkspace.shared.open(dashboard) }
 
+  /** The dashboard selects the server named in its URL's fragment. */
+  func openLogs(_ server: Server) {
+    let id = server.id.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? server.id
+    NSWorkspace.shared.open(URL(string: "#\(id)", relativeTo: dashboard)?.absoluteURL ?? dashboard)
+  }
+
+  /** Other machines' names, from their servers' `machine` field. */
+  var machines: [String] { Array(Set(servers.values.compactMap(\.machine))).sorted() }
+
+  /** Starts the stopped ones of `ids`, each machine in order; `key` marks what shows the spinner. */
+  func startMany(_ ids: [String], key: String) {
+    guard !ids.isEmpty else { return }
+    perform(key, "/api/servers/start", ["ids": ids, "wait": false])
+  }
+
+  func stopMany(_ ids: [String], key: String) {
+    guard !ids.isEmpty else { return }
+    perform(key, "/api/servers/stop", ["ids": ids])
+  }
+
+  /** Pinned servers also start at login; the daemon adds its login item when the first one is pinned. */
+  func togglePin(_ server: Server) {
+    perform(server.id, "/api/pin", ["id": server.id, "pinned": server.pinned != true])
+  }
+
+  func copyURL(_ server: Server) {
+    guard let url = server.customUrl ?? server.url else { return }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(url, forType: .string)
+  }
+
+  func openTerminal(_ server: Server) {
+    guard let cwd = server.cwd, server.machine == nil,
+          let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
+    NSWorkspace.shared.open([URL(fileURLWithPath: cwd, isDirectory: true)], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
+  }
+
+  /**
+   * Cursor or VS Code through their CLIs, which live on the login shell's PATH; Finder when neither
+   * is installed. The folder is passed as $1 so its name is never parsed as shell code.
+   */
+  func openEditor(_ server: Server) {
+    guard let cwd = server.cwd, server.machine == nil else { return }
+    Task.detached {
+      let proc = Process()
+      proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+      proc.arguments = ["-lc", "if command -v cursor >/dev/null; then cursor \"$1\"; elif command -v code >/dev/null; then code \"$1\"; else exit 127; fi", "zsh", cwd]
+      proc.standardOutput = FileHandle.nullDevice
+      proc.standardError = FileHandle.nullDevice
+      let ok = (try? proc.run()) != nil && { proc.waitUntilExit(); return proc.terminationStatus == 0 }()
+      if !ok {
+        await MainActor.run { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: cwd, isDirectory: true)]) }
+      }
+    }
+  }
+
+  /** The newest `count` non-blank lines of a server's latest run. */
+  func logTail(_ id: String, count: Int = 4) async throws -> [String] {
+    let data = try await client.get("/api/logs", ["id": id, "tail": String(count * 3)])
+    let lines = try JSONDecoder().decode(LogTail.self, from: data).lines
+    return Array(lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.suffix(count))
+  }
+
   /** The CLI lives in Homebrew's bin, which a login shell has on PATH and a GUI app doesn't. */
   func startDaemon() {
     lastError = nil
