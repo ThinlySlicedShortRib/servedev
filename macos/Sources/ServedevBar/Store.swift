@@ -24,6 +24,11 @@ final class Store: ObservableObject {
   @Published private(set) var recentCrashes: Set<String> = []
   /** Recent crashes the user hasn't opened the menu to see yet; these show the warning icon. */
   @Published private(set) var unseenCrashes: Set<String> = []
+  /**
+   * The profile whose servers the menu is narrowed to. Kept here rather than in the view so it
+   * lasts while the app runs; it isn't saved, so each launch starts with everything shown.
+   */
+  @Published var profileFilter: String?
 
   private let client = DaemonClient()
   private var loop: Task<Void, Never>?
@@ -34,6 +39,17 @@ final class Store: ObservableObject {
 
   var list: [Server] { servers.values.sorted { ($0.project, $0.name, $0.id) < ($1.project, $1.name, $1.id) } }
   var runningCount: Int { servers.values.filter(\.isActive).count }
+
+  /** Servers the selected profile covers, or nil when nothing is selected. */
+  var filterIds: Set<String>? {
+    guard let id = profileFilter, let p = profiles.first(where: { $0.id == id }) else { return nil }
+    return Set(p.servers + (p.members ?? []))
+  }
+
+  /** A deleted profile can't be a filter; showing nothing would look like servedev lost everything. */
+  private func dropMissingFilter() {
+    if let id = profileFilter, !profiles.contains(where: { $0.id == id }) { profileFilter = nil }
+  }
 
   func markCrashesSeen() {
     if !unseenCrashes.isEmpty { unseenCrashes = [] }
@@ -90,6 +106,7 @@ final class Store: ObservableObject {
       guard let snap = try? decoder.decode(Snapshot.self, from: data) else { return }
       servers = Dictionary(snap.servers.compactMap(\.value).map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
       profiles = snap.profiles.compactMap(\.value)
+      dropMissingFilter()
       pruneCrashes()
       connection = .connected
     case "server":
@@ -113,6 +130,7 @@ final class Store: ObservableObject {
     case "profiles":
       guard let list = try? decoder.decode([Lossy<Profile>].self, from: data) else { return }
       profiles = list.compactMap(\.value)
+      dropMissingFilter()
     default:
       break
     }

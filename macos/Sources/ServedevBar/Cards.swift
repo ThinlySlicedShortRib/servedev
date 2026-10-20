@@ -1,47 +1,92 @@
 import SwiftUI
 
-/** A profile as a Control Center tile: lit while any of its servers runs; a click flips it. */
+/**
+ * A profile as a Control Center tile. Clicking it narrows the menu to the profile's servers (again
+ * to show everything), and the selected tile turns accent blue like an active Control Center tile.
+ * Running shows as a green dot in the hint and in the corner button, which starts or stops it.
+ */
 struct ProfileTile: View {
   @EnvironmentObject var store: Store
   let profile: Profile
 
   var body: some View {
     let on = store.isRunning(profile)
+    let selected = store.profileFilter == profile.id
     let active = profile.servers.filter { store.servers[$0]?.isActive == true }.count
     let busy = store.busy.contains("profile:\(profile.id)")
     Button {
-      on ? store.stopProfile(profile) : store.startProfile(profile)
+      store.profileFilter = selected ? nil : profile.id
     } label: {
       VStack(alignment: .leading, spacing: 8) {
-        ZStack {
-          Circle().fill(on ? Color.blue : Color.primary.opacity(0.16))
-          if busy {
-            ProgressView().controlSize(.mini)
-          } else {
-            Image(systemName: "square.3.layers.3d")
-              .font(.system(size: 13, weight: .medium))
-              .foregroundStyle(on ? Color.white : Color.primary)
-          }
-        }
-        .frame(width: 28, height: 28)
+        Image(systemName: "square.3.layers.3d")
+          .font(.system(size: 13, weight: .medium))
+          .foregroundStyle(selected ? Color.white : Color.primary)
+          .frame(width: 28, height: 28)
+          .background(Circle().fill(selected ? Color.white.opacity(0.25) : Color.primary.opacity(0.16)))
         VStack(alignment: .leading, spacing: 1) {
           Text(profile.name)
             .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(selected ? Color.white : Color.primary)
             .lineLimit(1)
-          Text(on ? "\(active) of \(profile.servers.count) on" : "Off · \(profile.servers.count) servers")
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+          HStack(spacing: 4) {
+            if on {
+              // A white edge keeps the green dot visible on the blue selected tile.
+              Circle()
+                .fill(Color.green)
+                .overlay(Circle().strokeBorder(Color.white.opacity(selected ? 0.9 : 0), lineWidth: 1))
+                .frame(width: 7, height: 7)
+            }
+            Text(on ? "\(active) of \(profile.servers.count) running" : "Off · \(profile.servers.count) servers")
+              .lineLimit(1)
+          }
+          .font(.system(size: 11))
+          .foregroundStyle(selected ? AnyShapeStyle(Color.white.opacity(0.8)) : AnyShapeStyle(.secondary))
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(10)
-      .background(RoundedRectangle(cornerRadius: 12).fill(on ? Color.blue.opacity(0.22) : Color.primary.opacity(0.08)))
+      .background(RoundedRectangle(cornerRadius: 12).fill(selected ? Color.accentColor : Color.primary.opacity(0.08)))
       .contentShape(RoundedRectangle(cornerRadius: 12))
     }
     .buttonStyle(.plain)
-    .disabled(busy)
-    .help(on ? "Stop \(profile.name)" : "Start \(profile.name)")
+    .help([profile.project, profile.branch].compactMap { $0 }.joined(separator: " · "))
+    .accessibilityLabel(selected ? "Show all servers" : "Show only \(profile.name)")
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    // Outside the tile's own button, so starting or stopping never changes the filter.
+    .overlay(alignment: .topTrailing) {
+      Group {
+        if busy {
+          ProgressView().controlSize(.mini)
+        } else {
+          Button {
+            on ? store.stopProfile(profile) : store.startProfile(profile)
+          } label: {
+            Image(systemName: on ? "stop.fill" : "play.fill")
+              .font(.system(size: 9, weight: .bold))
+              .foregroundStyle(cornerForeground(on: on, selected: selected))
+              .frame(width: 22, height: 22)
+              .background(Circle().fill(cornerBackground(on: on, selected: selected)))
+              .contentShape(Circle())
+          }
+          .buttonStyle(.plain)
+          .help(on ? "Stop \(profile.name)" : "Start \(profile.name)")
+          .accessibilityLabel(on ? "Stop \(profile.name)" : "Start \(profile.name)")
+        }
+      }
+      .frame(width: 22, height: 22)
+      .padding(8)
+    }
+  }
+
+  /** Play is the filled accent circle; on the accent tile it flips to white so it doesn't vanish. */
+  private func cornerBackground(on: Bool, selected: Bool) -> Color {
+    if selected { return on ? Color.white.opacity(0.25) : Color.white }
+    return on ? Color.primary.opacity(0.16) : Color.accentColor
+  }
+
+  private func cornerForeground(on: Bool, selected: Bool) -> Color {
+    if selected { return on ? Color.white : Color.accentColor }
+    return on ? Color.primary : Color.white
   }
 }
 
