@@ -35,6 +35,8 @@ struct MenuView: View {
   @State private var expanded: String?
   @State private var showStopped = false
   @State private var confirmStopAll = false
+  /** The cards' natural height; starts at the cap so the list is never 0 before it's measured. */
+  @State private var cardsHeight: CGFloat = 480
 
   private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -56,12 +58,14 @@ struct MenuView: View {
         TextField("Search servers", text: $query)
           .textFieldStyle(.roundedBorder)
         if !profiles.isEmpty { profileTiles }
-        // A bare ScrollView always takes its full height; this only scrolls when the cards overflow.
-        ViewThatFits(in: .vertical) {
-          cards
-          ScrollView { cards }
+        // The menu window sizes itself to its content, and a ScrollView has no height of its own
+        // (it would get 0). So the cards are measured and the scroll area gets exactly that, up to 480.
+        ScrollView {
+          cards.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+            cardsHeight = max(h, 1)
+          }
         }
-        .frame(maxHeight: 480)
+        .frame(height: min(cardsHeight, 480))
       }
       footer
     }
