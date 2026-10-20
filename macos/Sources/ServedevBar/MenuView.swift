@@ -37,6 +37,9 @@ struct MenuView: View {
   @State private var confirmStopAll = false
   /** The cards' natural height; starts at the cap so the list is never 0 before it's measured. */
   @State private var cardsHeight: CGFloat = 480
+  /** The whole menu's natural height, which the window is sized to. */
+  @State private var contentHeight: CGFloat = 0
+  @State private var windowRef = WindowRef()
 
   private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -72,11 +75,22 @@ struct MenuView: View {
     }
     .padding(12)
     .frame(width: 360)
+    // The menu window doesn't always shrink to its content, and SwiftUI centres shorter content in
+    // it, which shows as empty bands above and below. So the content reports its exact height, the
+    // window is resized to it (top edge kept under the menu bar), and any leftover goes below.
+    .fixedSize(horizontal: false, vertical: true)
+    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+      contentHeight = h
+      fitWindow()
+    }
+    .background(WindowReader { windowRef.window = $0; fitWindow() })
+    .frame(maxHeight: .infinity, alignment: .top)
     // Opening the menu counts as seeing the crashes. onAppear can miss later openings of a .window
     // MenuBarExtra, so the window becoming key (this app's only window) is watched as well.
     .onAppear { store.markCrashesSeen() }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
       store.markCrashesSeen()
+      fitWindow()
     }
     // Closing the menu collapses the open row, which stops its log polling.
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
@@ -86,6 +100,17 @@ struct MenuView: View {
     .onChange(of: store.machines) { _, names in
       if case .remote(let name) = machine, !names.contains(name) { machine = .local }
     }
+  }
+
+  /** Makes the window exactly as tall as the content, growing or shrinking downwards from the menu bar. */
+  private func fitWindow() {
+    guard let window = windowRef.window, contentHeight > 0 else { return }
+    let size = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: window.contentLayoutRect.width, height: contentHeight)).size
+    guard abs(window.frame.height - size.height) > 0.5 else { return }
+    var frame = window.frame
+    frame.origin.y += frame.height - size.height
+    frame.size.height = size.height
+    window.setFrame(frame, display: true)
   }
 
   // MARK: Header and filters
@@ -296,6 +321,35 @@ struct MenuView: View {
           .controlSize(.small)
           .keyboardShortcut("q")
       }
+    }
+  }
+}
+
+/** Holds the menu's window without making SwiftUI re-render when it's set. */
+final class WindowRef {
+  weak var window: NSWindow?
+}
+
+/** Reports the NSWindow its view lands in; SwiftUI has no direct way to reach the MenuBarExtra window. */
+private struct WindowReader: NSViewRepresentable {
+  let found: (NSWindow?) -> Void
+
+  init(_ found: @escaping (NSWindow?) -> Void) { self.found = found }
+
+  func makeNSView(context: Context) -> NSView { Probe(found: found) }
+  func updateNSView(_ view: NSView, context: Context) {}
+
+  private final class Probe: NSView {
+    let found: (NSWindow?) -> Void
+    init(found: @escaping (NSWindow?) -> Void) {
+      self.found = found
+      super.init(frame: .zero)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      let window = window
+      DispatchQueue.main.async { self.found(window) }
     }
   }
 }
