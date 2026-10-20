@@ -30,6 +30,7 @@ Ideas to look into before deciding.
 
 ## Done
 
+- 2026-10-20: macOS menu bar app (`macos/`, `bun run build:mac`): running count and crash warning in the menu bar; start, stop, restart and open servers and profiles from a searchable menu; live updates from the event stream, crash notifications, starts the daemon when it's down, and launch at login.
 - 2026-10-09: Per-device access keys: each hub gets its own key from a machine over SSH (`servedev keys issue`), so the machine's token never leaves it; devices are listed and revoked with `servedev keys`, the MCP tools and the Machines sheet ("Devices that can control this computer"). Older machines fall back to their token with a warning. Clearer checklist wording (Connects over SSH, System, Access key, Reaches servedev through SSH).
 - 2026-10-09: Platform layer: everything that depends on the local OS (ports, process table, spawning and stopping process groups, login environment, default home, folder picker, autostart) goes through one `Platform` interface in `src/platform/`, with today's code in `posix.ts` and a `windows.ts` stub; no behavior change.
 - 2026-10-07: A rebuild never removes the dashboard file, so dev mode survives `bun run build`; a daemon with no dashboard build serves a short page instead of failing.
