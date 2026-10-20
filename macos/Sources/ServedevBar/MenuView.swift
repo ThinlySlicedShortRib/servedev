@@ -58,6 +58,7 @@ struct MenuView: View {
         TextField("Search servers", text: $query)
           .textFieldStyle(.roundedBorder)
         if !profiles.isEmpty { profileTiles }
+        if let name = filterName { filterBar(name) }
         // The menu window sizes itself to its content, and a ScrollView has no height of its own
         // (it would get 0). So the cards are measured and the scroll area gets exactly that, up to 480.
         ScrollView {
@@ -147,6 +148,31 @@ struct MenuView: View {
     }
   }
 
+  private var filterIds: Set<String>? { store.filterIds }
+
+  private var filterName: String? {
+    store.profileFilter.flatMap { id in store.profiles.first { $0.id == id }?.name }
+  }
+
+  private func filterBar(_ name: String) -> some View {
+    HStack(spacing: 6) {
+      Image(systemName: "line.3.horizontal.decrease.circle.fill")
+        .foregroundStyle(.secondary)
+      Text("Showing: ").foregroundStyle(.secondary) + Text(name).fontWeight(.semibold)
+      Spacer()
+      Button {
+        store.profileFilter = nil
+      } label: {
+        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+      }
+      .buttonStyle(.borderless)
+      .help("Show all servers")
+      .accessibilityLabel("Clear the \(name) filter")
+    }
+    .font(.system(size: 12))
+    .lineLimit(1)
+  }
+
   private var profileTiles: some View {
     LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 8), count: 3), spacing: 8) {
       ForEach(profiles) { ProfileTile(profile: $0) }
@@ -159,6 +185,7 @@ struct MenuView: View {
     let q = query.trimmingCharacters(in: .whitespaces).lowercased()
     return store.list.filter { s in
       guard machine.includes(s) else { return false }
+      if let ids = filterIds, !ids.contains(s.id) { return false }
       guard !q.isEmpty else { return true }
       return [s.name, s.project, s.id, s.branch ?? "", s.machine ?? "", s.port.map(String.init) ?? ""]
         .contains { $0.lowercased().contains(q) }
@@ -174,9 +201,11 @@ struct MenuView: View {
         ProjectGroup(id: key, title: [servers[0].machine, servers[0].project].compactMap { $0 }.joined(separator: " · "), servers: servers)
       }
       .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    // A profile's list is short, so its stopped projects show in full instead of folding away.
+    let fold = store.profileFilter == nil
     let live = groups.filter { $0.servers.contains(where: isLive) }
-    let pinned = groups.filter { g in !g.servers.contains(where: isLive) && g.servers.contains { $0.pinned == true } }
-    let stopped = groups.filter { g in !g.servers.contains(where: isLive) && !g.servers.contains { $0.pinned == true } }
+    let pinned = groups.filter { g in !g.servers.contains(where: isLive) && (!fold || g.servers.contains { $0.pinned == true }) }
+    let stopped = fold ? groups.filter { g in !g.servers.contains(where: isLive) && !g.servers.contains { $0.pinned == true } } : []
 
     VStack(alignment: .leading, spacing: 8) {
       ForEach(live + pinned) { ProjectCard(group: $0, expanded: $expanded) }

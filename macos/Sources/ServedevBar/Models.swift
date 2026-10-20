@@ -41,6 +41,8 @@ struct Profile: Decodable, Identifiable, Equatable {
   let kind: String
   /** Server ids it starts, in order. */
   let servers: [String]
+  /** Every server it lists, skipped ones included. */
+  let members: [String]?
   let project: String?
   let branch: String?
 }

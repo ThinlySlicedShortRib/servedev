@@ -1,34 +1,33 @@
 import SwiftUI
 
-/** A profile as a Control Center tile: lit while any of its servers runs; a click flips it. */
+/**
+ * A profile as a Control Center tile. Clicking it narrows the menu to the profile's servers (again
+ * to show everything); the round button in its corner starts or stops it. Running shows as a blue
+ * fill, selection as a ring, so the two never look alike.
+ */
 struct ProfileTile: View {
   @EnvironmentObject var store: Store
   let profile: Profile
 
   var body: some View {
     let on = store.isRunning(profile)
+    let selected = store.profileFilter == profile.id
     let active = profile.servers.filter { store.servers[$0]?.isActive == true }.count
     let busy = store.busy.contains("profile:\(profile.id)")
     Button {
-      on ? store.stopProfile(profile) : store.startProfile(profile)
+      store.profileFilter = selected ? nil : profile.id
     } label: {
       VStack(alignment: .leading, spacing: 8) {
-        ZStack {
-          Circle().fill(on ? Color.blue : Color.primary.opacity(0.16))
-          if busy {
-            ProgressView().controlSize(.mini)
-          } else {
-            Image(systemName: "square.3.layers.3d")
-              .font(.system(size: 13, weight: .medium))
-              .foregroundStyle(on ? Color.white : Color.primary)
-          }
-        }
-        .frame(width: 28, height: 28)
+        Image(systemName: "square.3.layers.3d")
+          .font(.system(size: 13, weight: .medium))
+          .foregroundStyle(on ? Color.white : Color.primary)
+          .frame(width: 28, height: 28)
+          .background(Circle().fill(on ? Color.blue : Color.primary.opacity(0.16)))
         VStack(alignment: .leading, spacing: 1) {
           Text(profile.name)
             .font(.system(size: 12, weight: .semibold))
             .lineLimit(1)
-          Text(on ? "\(active) of \(profile.servers.count) on" : "Off · \(profile.servers.count) servers")
+          Text(on ? "\(active) of \(profile.servers.count) running" : "Off · \(profile.servers.count) servers")
             .font(.system(size: 11))
             .foregroundStyle(.secondary)
             .lineLimit(1)
@@ -37,11 +36,37 @@ struct ProfileTile: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(10)
       .background(RoundedRectangle(cornerRadius: 12).fill(on ? Color.blue.opacity(0.22) : Color.primary.opacity(0.08)))
+      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(selected ? 0.85 : 0), lineWidth: 2))
       .contentShape(RoundedRectangle(cornerRadius: 12))
     }
     .buttonStyle(.plain)
-    .disabled(busy)
-    .help(on ? "Stop \(profile.name)" : "Start \(profile.name)")
+    .help([profile.project, profile.branch].compactMap { $0 }.joined(separator: " · "))
+    .accessibilityLabel(selected ? "Show all servers" : "Show only \(profile.name)")
+    .accessibilityAddTraits(selected ? .isSelected : [])
+    // Outside the tile's own button, so starting or stopping never changes the filter.
+    .overlay(alignment: .topTrailing) {
+      Group {
+        if busy {
+          ProgressView().controlSize(.mini)
+        } else {
+          Button {
+            on ? store.stopProfile(profile) : store.startProfile(profile)
+          } label: {
+            Image(systemName: on ? "stop.fill" : "play.fill")
+              .font(.system(size: 9, weight: .bold))
+              .foregroundStyle(on ? Color.primary : Color.white)
+              .frame(width: 22, height: 22)
+              .background(Circle().fill(on ? Color.primary.opacity(0.16) : Color.blue))
+              .contentShape(Circle())
+          }
+          .buttonStyle(.plain)
+          .help(on ? "Stop \(profile.name)" : "Start \(profile.name)")
+          .accessibilityLabel(on ? "Stop \(profile.name)" : "Start \(profile.name)")
+        }
+      }
+      .frame(width: 22, height: 22)
+      .padding(8)
+    }
   }
 }
 
