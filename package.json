@@ -12,6 +12,7 @@
     "ui:dev": "cd ui && npm run dev",
     "build:ui": "bun scripts/build-ui.ts",
     "build": "bun run build:ui && bun build src/cli.ts --compile --outfile dist/servedev",
+    "build:mac": "macos/build.sh",
     "test": "bun test test/",
     "typecheck": "tsc --noEmit && cd ui && npm run typecheck"
   },

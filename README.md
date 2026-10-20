@@ -190,6 +190,17 @@ MCP tools cover everything the dashboard can do, so you can ask an agent to "mak
 | Other machines | `list_machines`, `reconnect_machine`, `update_machine`, `list_folders` (server tools take `machine`); `list_device_keys`, `revoke_device_key`, `allow_device_key` (devices allowed to control this one) |
 | Settings | `get_settings`, `update_settings` (log retention, proxy port, login autostart) |
 
+## macOS menu bar app
+
+A small native app (SwiftUI, in `macos/`) that keeps servedev in the menu bar: the icon shows how many servers are running and turns into a warning when one crashes, until you open the menu. The menu looks like Control Center: profiles as tiles you click to start or stop, then a card per project with a switch for the whole project and one per server. Projects with something running come first; stopped ones are folded away, and the search field filters everything. Click a server to see its last few log lines (live while it runs) and buttons to open, restart, start or stop it, show its logs in the dashboard, copy its URL, pin it, or open its folder in Terminal or your editor (Cursor or VS Code, else Finder). With other machines connected, a switch at the top picks This Mac, one of them, or all. It follows the daemon's event stream, so it updates live, sends a notification when a server crashes, and can start the daemon when it isn't running. It talks to `127.0.0.1:7777` with your token, like the CLI.
+
+```sh
+bun run build:mac               # builds dist/Servedev Bar.app (needs Swift / Xcode command line tools)
+macos/build.sh --install        # also copies it to /Applications and opens it
+```
+
+"Launch at login" is a checkbox in the menu, next to "Stop all on This Mac" (it asks once more before stopping).
+
 ## How it works
 
 `servedev` auto-starts a small daemon (`127.0.0.1:7777`) that owns the processes. The CLI, the MCP server and the dashboard are all clients of its HTTP API. Each server runs as `sh -c <command>` in its own process group, with stdout/stderr going straight to a log file, so servers keep running if the daemon stops and a new daemon adopts them. The dashboard is at http://servedev.localhost, through the hostname proxy (and always at `127.0.0.1:7777`); the `dashboard_hostname` setting changes the name, e.g. to a domain of yours that points at 127.0.0.1.
