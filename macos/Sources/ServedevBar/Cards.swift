@@ -90,7 +90,7 @@ struct ProfileTile: View {
   }
 }
 
-/** One project's servers on a rounded card, with a switch for all of them. */
+/** One project's servers on a rounded card, with a button to start or stop all of them. */
 struct ProjectCard: View {
   @EnvironmentObject var store: Store
   let group: ProjectGroup
@@ -112,20 +112,14 @@ struct ProjectCard: View {
         if store.busy.contains(key) {
           ProgressView().controlSize(.small)
         } else {
-          Toggle("All servers in \(group.title)", isOn: Binding(
-            get: { !active.isEmpty },
-            set: { on in
-              if on {
-                store.startMany(group.servers.filter { !$0.isActive && $0.stale != true }.map(\.id), key: key)
-              } else {
-                store.stopMany(active.map(\.id), key: key)
-              }
+          let anyOn = !active.isEmpty
+          RowIconButton(anyOn ? "stop.fill" : "play.fill", label: anyOn ? "Stop all in \(group.title)" : "Start all in \(group.title)", accent: !anyOn) {
+            if anyOn {
+              store.stopMany(active.map(\.id), key: key)
+            } else {
+              store.startMany(group.servers.filter { $0.stale != true }.map(\.id), key: key)
             }
-          ))
-          .toggleStyle(.switch)
-          .controlSize(.mini)
-          .labelsHidden()
-          .tint(.green)
+          }
         }
       }
       .padding(.vertical, 6)
@@ -141,7 +135,7 @@ struct ProjectCard: View {
   }
 }
 
-/** A server: click it to expand its actions and log tail; the switch starts or stops it. */
+/** A server: click it to expand its actions and log tail; the buttons on the right start, stop or restart it. */
 struct ServerRow: View {
   @EnvironmentObject var store: Store
   let server: Server
@@ -183,19 +177,21 @@ struct ServerRow: View {
         .onHover { hovering = $0 }
         .help(server.id)
 
-        if store.busy.contains(server.id) {
-          ProgressView().controlSize(.small)
-        } else {
-          Toggle(server.name, isOn: Binding(
-            get: { server.isActive },
-            set: { $0 ? store.start(server) : store.stop(server) }
-          ))
-          .toggleStyle(.switch)
-          .controlSize(.mini)
-          .labelsHidden()
-          .tint(.green)
-          .disabled(server.stale == true)
+        // Beside the row's own button, so these never expand or collapse it.
+        HStack(spacing: 4) {
+          if store.busy.contains(server.id) {
+            ProgressView().controlSize(.small)
+          } else {
+            if server.isActive {
+              RowIconButton("arrow.clockwise", label: "Restart \(server.name)") { store.restart(server) }
+              RowIconButton("stop.fill", label: "Stop \(server.name)") { store.stop(server) }
+            } else {
+              RowIconButton("play.fill", label: "Start \(server.name)", accent: true) { store.start(server) }
+            }
+          }
         }
+        .frame(width: 48, alignment: .trailing)
+        .disabled(server.stale == true)
       }
       if isExpanded {
         ServerDetail(server: server)
@@ -388,5 +384,41 @@ private struct ActionButton: View {
   private var background: Color {
     if prominent { return .blue }
     return hovering && isEnabled ? Color.blue.opacity(0.28) : .clear
+  }
+}
+
+/**
+ * A small round icon button for rows and card headers. Play uses the accent colour so the one
+ * action a stopped row offers stands out; stop and restart stay neutral.
+ */
+struct RowIconButton: View {
+  let symbol: String
+  let label: String
+  let accent: Bool
+  let action: () -> Void
+  @State private var hovering = false
+  @Environment(\.isEnabled) private var isEnabled
+
+  init(_ symbol: String, label: String, accent: Bool = false, action: @escaping () -> Void) {
+    self.symbol = symbol
+    self.label = label
+    self.accent = accent
+    self.action = action
+  }
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 9, weight: .bold))
+        .foregroundStyle(accent ? Color.accentColor : Color.primary.opacity(0.8))
+        .frame(width: 22, height: 22)
+        .background(Circle().fill(Color.primary.opacity(hovering && isEnabled ? 0.16 : 0.08)))
+        .contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .opacity(isEnabled ? 1 : 0.4)
+    .onHover { hovering = $0 }
+    .help(label)
+    .accessibilityLabel(label)
   }
 }
